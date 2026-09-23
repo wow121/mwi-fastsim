@@ -87,7 +87,8 @@ async function useGameData(envelope) {
 async function ensureEngine() {
   if (ctx) return ctx
   if (!loading) {
-    const env = readJson(path.join(DATA, "envelope.json"), null)
+    // synced from the game, else the game data shipped with the web app
+    const env = readJson(path.join(DATA, "envelope.json"), null) || readJson(path.join(here, "..", "web", "public", "data", "gamedata.json"), null)
     if (!env) throw new Error(NO_DATA)
     loading = useGameData(env).finally(() => { loading = null })
   }
@@ -175,7 +176,7 @@ async function api(req, url, body) {
   if (p === "/api/state" && req.method === "GET") {
     return {
       team: loadTeam(),
-      engine: ctx ? { mode: ctx.mode, gameVersion: ctx.m.version, gameData: ctx.gdHash, threads: THREADS } : null,
+      engine: ctx ? { mode: ctx.mode, gameVersion: ctx.m.version, bundled: ctx.m.envelope.source === "bundled", gameData: ctx.gdHash, threads: THREADS } : null,
       market: market ? { timestamp: market.timestamp } : null,
     }
   }

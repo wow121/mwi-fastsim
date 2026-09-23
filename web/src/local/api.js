@@ -63,10 +63,15 @@ async function useGameData(envelope) {
 function ensureEngine() {
   if (ctx) return Promise.resolve(ctx)
   loading ||= (async () => {
+    // synced from the game, else the game data shipped with the site
+    let env = await kvGet("envelope")
+    if (!env) {
+      const r = await fetch(`${BASE}data/gamedata.json`).catch(() => null)
+      env = r?.ok ? await r.json() : null
+    }
+    if (!env) throw new Error(NO_DATA)
     market = await kvGet("market")
     if (!market || Date.now() / 1000 - market.timestamp > 1800) await refreshMarket()
-    const env = await kvGet("envelope")
-    if (!env) throw new Error(NO_DATA)
     return useGameData(env)
   })()
   loading.catch(() => {}).finally(() => { loading = null })
@@ -86,7 +91,7 @@ export async function localApi(method, p, body = {}) {
   if (p === "/api/state" && method === "GET") {
     return {
       team: await kvGet("team", EMPTY_TEAM),
-      engine: ctx ? { mode: "wasm", gameVersion: ctx.m.version, gameData: ctx.gdHash, threads: ctx.rust.threads } : null,
+      engine: ctx ? { mode: "wasm", gameVersion: ctx.m.version, bundled: ctx.m.envelope.source === "bundled", gameData: ctx.gdHash, threads: ctx.rust.threads } : null,
       market: market ? { timestamp: market.timestamp } : null,
     }
   }

@@ -87,7 +87,7 @@ async function deleteLoadout(l) {
     <h2>队伍</h2>
     <el-alert v-if="!store.team.members.length || store.team.sample" type="info" :closable="false" style="margin-bottom: 12px">
       <template #title>
-        {{ store.team.sample ? "当前是测试队伍。" : "还没有队伍数据。" }}装好 mwi-fastsim 用户脚本后刷新游戏页面（队长或任一队员的号都行），{{ store.mode === "browser" ? "左下角显示“已读取”后再刷新本页，会自动导入。" : "左下角显示“已同步”后再刷新本页。" }}
+        {{ store.team.sample ? "当前是测试队伍。" : "还没有队伍数据。" }}装好 <el-link type="primary" href="https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js" target="_blank">mwi-fastsim 油猴脚本</el-link>后刷新游戏页面（队长或任一队员的号都行），{{ store.mode === "browser" ? "左下角显示“已读取”后再刷新本页，会自动导入。" : "左下角显示“已同步”后再刷新本页。" }}
       </template>
     </el-alert>
 

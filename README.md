@@ -2,7 +2,7 @@
 
 Milky Way Idle（牛牛放置）的战斗模拟与整队优化工具。
 
-**在线使用：https://wow121.github.io/mwi-fastsim/** （先安装 [油猴脚本](https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js)，再打开一次游戏页面）
+**在线使用：https://wow121.github.io/mwi-fastsim/** 打开就能用装备获取成本；模拟和优化要用自己的队伍，先安装 [油猴脚本](https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js)，再打开一次游戏页面。
 
 *A fast combat simulator and team optimizer for Milky Way Idle. The engine is written in Rust and runs either
 natively behind a small local server or as WebAssembly entirely in the browser. The UI is in Chinese.*
@@ -103,7 +103,8 @@ userscript/        油猴脚本
 ```
 
 游戏数据（物品、怪物、技能、区域等）用的是游戏自己的客户端数据，由油猴脚本在游戏页面读取。
-本地服务把它保存在 `node/data/envelope.json`，浏览器版保存在 IndexedDB。第一次使用前需要先打开一次游戏页面。
+本地服务把它保存在 `node/data/envelope.json`，浏览器版保存在 IndexedDB。
+还没同步过时，使用网站内置的一份游戏数据（`web/public/data/gamedata.json`），所以不装脚本也能用装备获取成本等功能；同步后自动换成游戏里的最新数据。
 
 ## 测试
 
