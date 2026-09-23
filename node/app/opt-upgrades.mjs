@@ -70,12 +70,12 @@ function bookInfo(maps) {
  * version) or buying the normal version and refining it — and the resale value after tax.
  */
 export class GearPrices {
-  /** opts.refinedResale: "unrefine" (default) values a refined piece as un-refined, "market" at its bid */
+  /** opts.refinedResale: "market" (default: sold at the bid) or "unrefine" (valued as un-refined, conservative) */
   constructor(maps, book, tax, opts = {}) {
     this.maps = maps
     this.book = book
     this.tax = tax
-    this.refinedResale = opts.refinedResale || "unrefine"
+    this.refinedResale = opts.refinedResale || "market"
     this.refs = refinements(maps)
     this.cap = (maps.enhancementLevelSuccessRateTable || []).length || 20
     this.mirror = book.price(MIRROR, "ask") || INF
@@ -170,8 +170,8 @@ export class GearPrices {
     const raw = q.bid > 0 ? q.bid : q.ask < INF ? q.ask * 0.9 : cost < INF ? cost * 0.8 : 0
     // never above what it costs to get: a bid over the refining / mirror cost is a trade, not an upgrade
     const market = Math.min(raw, cost) * (1 - this.tax)
-    // refined pieces rarely sell for their bid, and the cheap way up later is "buy normal + refine":
-    // count a refined piece as un-refined (normal version's value + half of the materials back)
+    // optional, conservative: count a refined piece as un-refined (normal version's value + half of
+    // the materials back) instead of selling it at its bid
     const f = this.family(h)
     if (this.refinedResale === "unrefine" && h === f.refined) return Math.min(market, this.value(f.base, n) + f.unrefineValue)
     return market
