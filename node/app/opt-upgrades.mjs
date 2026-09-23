@@ -324,7 +324,7 @@ async function searchPlan(P, signal) {
     return improved
   }
   for (let guard = 0; guard < 200; guard++) {
-    await new Promise(r => setImmediate(r)) // keep the server responsive
+    await new Promise(r => setTimeout(r, 0)) // keep the page / server responsive
     if (signal?.aborted) throw new Error("cancelled")
     const cands = []
     for (const mv of moves) for (let pos = 0; pos <= plan.length; pos++) cands.push([...plan.slice(0, pos), mv, ...plan.slice(pos)])

@@ -100,7 +100,7 @@ export async function optimizeSkills(ev, params, api) {
             }
             if (cs.length === 1) return
             api.progress(0, cs.length, `${who} · ${name} 阈值${label}`)
-            const r = await halving(ev, cs, { ...common, stages: stages.slice(1), seedBase: 7000 + idx })
+            const r = await halving(ev, cs, { ...common, stages: stages.length > 1 ? stages.slice(1) : stages, seedBase: 7000 + idx })
             if (!r[0].incumbent && r[0].vsIncumbent.mean > 0) best = { ...r[0], incumbent: false }
           }
           await tryValues(gridFor(s), "粗搜")

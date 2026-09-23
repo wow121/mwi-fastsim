@@ -32,6 +32,12 @@ jobs:
         working-directory: engine
         run: cargo build --profile wasm --target wasm32-unknown-unknown --lib
 
+      - name: Shared code must run in the browser
+        run: |
+          if grep -nE "setImmediate|process\.|Buffer\.|require\(|from \"node:" node/app/*.mjs | grep -v "^node/app/jobs.mjs"; then
+            echo "node/app is shared with the browser build: no Node-only APIs (jobs.mjs is server-only)"; exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

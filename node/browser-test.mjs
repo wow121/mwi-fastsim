@@ -92,6 +92,17 @@ try {
     j = await ev(`return await __fastsim.call("GET", "/api/jobs/${id}")`)
   } while (j.status === "running")
   out(`browser job consumables: ${j.status} in ${((Date.now() - t0) / 1000).toFixed(0)}s ${j.error ? j.error.split("\n")[0] : ""}; ${j.log.at(-1)?.msg || ""}`)
+  // every job type that runs in the browser, with tiny settings
+  for (const [type, extra] of [["upgrades", { hours: 2, seeds: 2, budgets: [5e8, 5e8, 5e8], horizons: [30] }], ["skills", { rounds: 1, stages: [{ hours: 1, seeds: 2, keep: 3 }] }]]) {
+    t0 = Date.now()
+    const { id: jid } = await ev(`return await __fastsim.call("POST", "/api/jobs", ${JSON.stringify({ type, params: { ...body, ...extra } })})`)
+    let jj
+    do {
+      await sleep(1000)
+      jj = await ev(`return await __fastsim.call("GET", "/api/jobs/${jid}")`)
+    } while (jj.status === "running")
+    out(`browser job ${type}: ${jj.status} in ${((Date.now() - t0) / 1000).toFixed(0)}s ${jj.error ? jj.error.split("\n")[0] : ""}; ${jj.log.at(-1)?.msg || ""}`)
+  }
   const text = async () => (await ev(`return document.body.innerText`)).replace(/\s+/g, " ").slice(0, 1400)
   await ev(`location.hash = "#/team"`)
   await sleep(1500)
