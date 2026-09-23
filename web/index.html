@@ -9,5 +9,15 @@
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
+    <!-- Cloudflare Web Analytics: only on the GitHub Pages site, not the local accelerator -->
+    <script>
+      if (location.hostname.endsWith(".github.io")) {
+        const s = document.createElement("script")
+        s.defer = true
+        s.src = "https://static.cloudflareinsights.com/beacon.min.js"
+        s.dataset.cfBeacon = '{"token": "635b7256dca9425b9e60e4eb4bc91bed"}'
+        document.body.appendChild(s)
+      }
+    </script>
   </body>
 </html>
