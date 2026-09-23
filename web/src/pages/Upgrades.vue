@@ -27,7 +27,7 @@ const hours = ref(12)
 const seeds = ref(8)
 const replacements = ref(true)
 const optimize = ref(members.value.map((_, i) => i))
-const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 5, maxLevelUp: 6, keepEnd: false, houses: true, guild: true }))
+const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 5, maxLevelUp: 6, keepEnd: false, houses: true, guild: true, refinedMarket: false }))
 if (!plan.value.cash) plan.value.cash = {}
 if (!plan.value.other) plan.value.other = {}
 if (plan.value.houses == null) plan.value.houses = true
@@ -45,7 +45,7 @@ function params() {
   const p = plan.value
   return {
     members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value, replacements: replacements.value, optimize: optimize.value,
-    houses: p.houses !== false, guild: p.guild !== false, budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd,
+    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedMarket ? "market" : "unrefine", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd,
   }
 }
 function onResult(r) {
@@ -66,6 +66,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级、房子 +1～+3 级）逐个模拟，得到每项每天多赚多少；
         再按你的现金和每天收入排出购买顺序：钱够了就买，目标是规划期末的总资产（现金 + 身上装备按买一价扣税能卖的钱）最高。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
+        精炼版装备的回收价默认按「解精炼后普通版能卖的钱 + 拿回的一半精炼材料」算：精炼版很少能按买价卖出，以后往上升最划算的通常又是买普通版再精炼，所以早精炼的材料基本收不回来。
         房子按升级材料的市场价加金币算，升上去卖不回来。公会加成花的是公会点数、整个公会一起生效，只在单项表里列出供参考，不进购买计划。
         获得装备的成本取最便宜的路线：直接买、贤者之镜合成（+N 加一件 +(N-1) 垫子加镜子 = +(N+1)，手上的装备可以当主件或垫子）、买普通版自己精炼。
       </p>
@@ -86,6 +87,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         </el-checkbox-group>
         <span class="muted">强化最多比现在高</span><el-input-number v-model="plan.maxLevelUp" :min="1" :max="10" size="small" /><span class="muted">级</span>
         <el-checkbox v-model="plan.keepEnd">期末装备不扣卖出税（打算一直留着）</el-checkbox>
+        <el-checkbox v-model="plan.refinedMarket">精炼版按市场买价估回收价（默认按解精炼估：精炼版不好卖）</el-checkbox>
       </div>
       <div class="row" style="margin-bottom: 12px">
         <span class="muted">每项</span><el-input-number v-model="hours" :min="1" :max="72" size="small" /><span class="muted">小时 ×</span>

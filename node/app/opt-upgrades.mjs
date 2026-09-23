@@ -70,10 +70,12 @@ function bookInfo(maps) {
  * version) or buying the normal version and refining it — and the resale value after tax.
  */
 export class GearPrices {
-  constructor(maps, book, tax) {
+  /** opts.refinedResale: "unrefine" (default) values a refined piece as un-refined, "market" at its bid */
+  constructor(maps, book, tax, opts = {}) {
     this.maps = maps
     this.book = book
     this.tax = tax
+    this.refinedResale = opts.refinedResale || "unrefine"
     this.refs = refinements(maps)
     this.cap = (maps.enhancementLevelSuccessRateTable || []).length || 20
     this.mirror = book.price(MIRROR, "ask") || INF
@@ -167,7 +169,12 @@ export class GearPrices {
     const cost = this.acq(h)[n].cost
     const raw = q.bid > 0 ? q.bid : q.ask < INF ? q.ask * 0.9 : cost < INF ? cost * 0.8 : 0
     // never above what it costs to get: a bid over the refining / mirror cost is a trade, not an upgrade
-    return Math.min(raw, cost) * (1 - this.tax)
+    const market = Math.min(raw, cost) * (1 - this.tax)
+    // refined pieces rarely sell for their bid, and the cheap way up later is "buy normal + refine":
+    // count a refined piece as un-refined (normal version's value + half of the materials back)
+    const f = this.family(h)
+    if (this.refinedResale === "unrefine" && h === f.refined) return Math.min(market, this.value(f.base, n) + f.unrefineValue)
+    return market
   }
 
   /** Cheapest way from holding (h0, n0) to holding (h, n): { cost, how } (cost = cash out). */
@@ -466,7 +473,7 @@ export async function adviseUpgrades(ev, params, api) {
   const horizons = (params.horizons?.length ? params.horizons : [30, 60]).map(Number).filter(d => d > 0).sort((a, b) => a - b)
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
   const maps = ev.ctx.m.$e
-  const gp = new GearPrices(maps, ev.ctx.book, tax)
+  const gp = new GearPrices(maps, ev.ctx.book, tax, { refinedResale: params.refinedResale })
 
   const baseline = await ev.evaluate(members, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
   const P0 = baseline.mean.profitPerHour * 24

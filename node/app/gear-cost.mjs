@@ -56,7 +56,7 @@ function mirrorUp(gp, h, from, to) {
 export function gearCost(game, book, params) {
   const maps = game.$e
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
-  const gp = new GearPrices(maps, book, tax)
+  const gp = new GearPrices(maps, book, tax, { refinedResale: params.refinedResale || "market" })
   const h = String(params.hrid || "")
   const n = Math.max(0, Math.floor(Number(params.level || 0)))
   if (!maps.itemDetailMap[h]?.equipmentDetail) throw new Error("请选择一件装备")

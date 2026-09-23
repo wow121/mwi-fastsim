@@ -39,7 +39,7 @@ export async function planGoal(ev, params, api) {
   const name = k => members[k].name || `队员${k + 1}`
   const maps = ev.ctx.m.$e
   const xpTable = maps.levelExperienceTable || []
-  const gp = new GearPrices(maps, ev.ctx.book, tax)
+  const gp = new GearPrices(maps, ev.ctx.book, tax, { refinedResale: params.refinedResale })
   const quick = { hours: 4, seeds: seedList(4242, 3) }
   const main = { hours: 12, seeds: seedList(9191, 8) }
   const long = { hours: 24, seeds: seedList(55511, 12) }
