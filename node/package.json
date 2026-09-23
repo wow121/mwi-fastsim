@@ -1,0 +1,11 @@
+{
+  "name": "mwi-fastsim-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "lz-string": "^1.5.0"
+  }
+}

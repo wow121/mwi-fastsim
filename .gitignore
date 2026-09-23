@@ -1,0 +1,6 @@
+engine/target/
+node_modules/
+node/cache/
+node/data/
+web/dist/
+web/public/engine/
