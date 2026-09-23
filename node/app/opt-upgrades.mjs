@@ -13,6 +13,7 @@ const clone = v => JSON.parse(JSON.stringify(v))
 const ARTISAN = 0.89
 const MIRROR = "/items/philosophers_mirror"
 const INF = Number.POSITIVE_INFINITY
+const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
 export const SLOT_ZH = { weapon: "武器", off_hand: "副手", head: "头部", body: "身体", legs: "腿部", hands: "手部", feet: "脚部", back: "背部", neck: "项链", earrings: "耳环", ring: "戒指", pouch: "袋子" }
 
 // the site's per-class "upper replacement" targets (simulationStatistics `re`)
@@ -286,9 +287,16 @@ export function memberSlots(ctx, gp, members, idx, opts) {
   // house rooms: +1..+maxHouseUp levels; cost = upgrade materials at the market ask + coins
   if (opts.houses !== false) {
     const up = Math.max(0, Math.floor(Number(opts.maxHouseUp ?? 3)))
+    // the combat skills of the member's style (magic: stamina / intelligence / attack / defense / magic)
+    const weapon = maps.itemDetailMap[cfg.equipment?.weapon?.itemHrid]?.equipmentDetail?.combatStats
+    const style = weapon?.combatStyleHrids?.[0] || "/combat_styles/smash"
+    const useful = new Set(Object.keys(maps.combatStyleDetailMap?.[style]?.skillExpMap || {}).map(h => h.split("/").pop()))
     for (const room of Object.values(maps.houseRoomDetailMap || {})) {
-      // "combat": only rooms with combat stats (levels / speeds / regen), not just rare find + wisdom
       const types = [...(room.actionBuffs || []), ...(room.globalBuffs || [])].map(b => String(b.typeHrid))
+      // a room that raises a combat level the member does not use (a mage's archery range / gym)
+      const raises = types.map(t => /\/buff_types\/(\w+)_level$/.exec(t)?.[1]).filter(x => x && SKILL_KEYS.includes(x))
+      if (raises.length && !raises.some(x => useful.has(x))) continue
+      // "combat": only rooms with combat stats (levels / speeds / regen), not just rare find + wisdom
       if (opts.houses === "combat" && !types.some(t => /_level$|attack_speed|cast_speed|hp_regen|mp_regen/.test(t))) continue
       const costs = room.upgradeCostsMap || {}
       const max = Math.max(0, ...Object.keys(costs).map(Number))
