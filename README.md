@@ -2,6 +2,8 @@
 
 Milky Way Idle（牛牛放置）的战斗模拟与整队优化工具。
 
+**在线使用：https://wow121.github.io/mwi-fastsim/** （先安装 [油猴脚本](https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js)，再打开一次游戏页面）
+
 *A fast combat simulator and team optimizer for Milky Way Idle. The engine is written in Rust and runs either
 natively behind a small local server or as WebAssembly entirely in the browser. The UI is in Chinese.*
 
@@ -33,7 +35,7 @@ natively behind a small local server or as WebAssembly entirely in the browser. 
 需要 [Rust](https://rustup.rs/) 和 [Node.js](https://nodejs.org/) 20 或以上。
 
 ```sh
-git clone <本仓库地址> mwi-fastsim
+git clone https://github.com/wow121/mwi-fastsim.git
 cd mwi-fastsim
 ./rebuild.sh              # Windows：双击 rebuild.cmd
 node/start-server.sh      # Windows：双击 node/start-server.cmd
@@ -41,20 +43,23 @@ node/start-server.sh      # Windows：双击 node/start-server.cmd
 
 然后：
 
-1. 浏览器安装 [Tampermonkey](https://www.tampermonkey.net/)，导入 `userscript/mwi-fastsim.user.js`。
+1. 浏览器安装 [Tampermonkey](https://www.tampermonkey.net/)，再点 [安装脚本](https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js)（之后会自动更新）。
 2. 打开游戏页面（队伍里任意一个号都可以）。左下角显示「已同步」就说明读取成功。
    队友的数据来自游戏里的队伍资料，缺哪个队友，就在游戏里点开对方的资料，脚本会自动补上。
 3. 打开 http://127.0.0.1:8765 。
 
-### 方式二：部署成网页（纯浏览器）
+### 方式二：网页版（纯浏览器）
 
-构建后，把 `web/dist` 整个目录上传到任意静态网站即可。nginx、对象存储、GitHub Pages 都可以，放在子目录也行，不需要后端，也不用配置重写规则。
+直接打开 https://wow121.github.io/mwi-fastsim/ 即可（同样需要先装油猴脚本，并打开一次游戏页面）。
+这个网页由 GitHub Actions 在每次推送到 `main` 后自动构建发布（`.github/workflows/pages.yml`）。
+
+也可以自己部署：构建后，把 `web/dist` 整个目录上传到任意静态网站即可。nginx、对象存储、GitHub Pages 都可以，放在子目录也行，不需要后端，也不用配置重写规则。
 
 页面打开后如果发现没有本地服务，就自动在浏览器里运行：
 - 引擎以 WebAssembly 形式在多个 Web Worker 里并行计算，每个 CPU 核一个。
 - 队伍、任务、游戏数据、市场价都存在浏览器的 IndexedDB 里。
 
-同样需要油猴脚本。在脚本头部照着 `localhost` 那一行，加上你部署的域名，例如：
+部署在自己的域名上时，要在油猴脚本头部照着已有的 `@match` 加上你的域名，例如：
 
 ```js
 // @match        https://mwi.example.com/*

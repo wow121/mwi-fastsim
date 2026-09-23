@@ -1,14 +1,15 @@
 // ==UserScript==
-// @name         MWI 战斗工具（本地）
+// @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.0
+// @version      0.4.1
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
-// 网页版部署在自己的域名上时，照下面 localhost 的写法加一行 @match（例如 // @match https://mwi.example.com/*）
+// 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
 // @match        https://milkywayidle.com/*
 // @match        https://www.milkywayidlecn.com/*
 // @match        https://milkywayidlecn.com/*
 // @match        https://combat.43.167.210.211.sslip.io/*
+// @match        https://wow121.github.io/*
 // @match        http://localhost/*
 // @match        http://127.0.0.1/*
 // @run-at       document-start
@@ -17,6 +18,9 @@
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      127.0.0.1
+// @homepageURL  https://github.com/wow121/mwi-fastsim
+// @updateURL    https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js
+// @downloadURL  https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js
 // ==/UserScript==
 
 (function () {

@@ -1,0 +1,60 @@
+# Builds the browser version (wasm engine + web app) and publishes web/dist to GitHub Pages.
+# Repository settings -> Pages -> Source: "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Build the engine (wasm)
+        working-directory: engine
+        run: cargo build --profile wasm --target wasm32-unknown-unknown --lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install shared logic deps
+        working-directory: node
+        run: npm install --no-audit --no-fund
+      - name: Build the web app
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f dist/engine/mwi_engine.wasm
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
