@@ -40,6 +40,8 @@ try {
   for (const l of j.log) console.log(" log:", l.msg)
   const r = j.result
   if (r) {
+    console.log(`\nhouse / guild rows:`)
+    for (const x of [...r.rows.filter(x => x.slotName.startsWith("房子") && /食堂|图书馆|道场|健身房|军械库|射箭场|神秘/.test(x.label) && x.memberName === "法师1"), ...r.rows.filter(x => x.guild).slice(0, 3)]) console.log(`  ${x.memberName} ${x.from} -> ${x.label} [${x.how}] cost ${x.guild ? x.guildPoints + " pts" : M(x.cost)} dP ${M(x.dProfitPerDay)}/d net60 ${M(x.net[60])}`)
     console.log(`\ntop rows by 60d net:`)
     for (const x of r.rows.slice(0, 15)) console.log(`  ${x.memberName} ${x.from} -> ${x.label} [${x.how}] cost ${M(x.cost)} loss ${M(x.loss)} dP ${M(x.dProfitPerDay)}/d net30 ${M(x.net[30])} net60 ${M(x.net[60])}`)
     for (const p of r.plans) {

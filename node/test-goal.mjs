@@ -30,7 +30,7 @@ try {
   const goal = { kind: "zone", zoneHrid: pick[0].hrid, difficultyTier: Number(process.argv[3] || 4) }
   const timeGrid = process.argv[5] ? process.argv[5].split(",").map(Number) : undefined
   const t0 = Date.now()
-  const { id } = await call("POST", "/api/jobs", { type: "goal", params: { members, goal, current: target, extra: { mooPass: true, comExp: 20, comDrop: 20 }, budgets: (process.argv[4] || "1000,1000,1000").split(",").map(v => Number(v) * 1e6), tax: 0.05, timeGrid } })
+  const { id } = await call("POST", "/api/jobs", { type: "goal", params: { members, goal, current: target, extra: { mooPass: true, comExp: 20, comDrop: 20 }, budgets: (process.argv[4] || "1000,1000,1000").split(",").map(v => Number(v) * 1e6), tax: 0.05, timeGrid, guild: process.env.GUILD === "1" } })
   let j
   do {
     await new Promise(r => setTimeout(r, 3000))
@@ -46,7 +46,7 @@ try {
   if (r) {
     for (const c of r.changes) console.log(`  ${c.memberName} ${c.slotName} ${c.from} -> ${c.to} [${c.how}] ${M(c.cost)}`)
     for (const c of r.consumableChanges) console.log(`  药品 ${c.when} ${c.memberName} ${c.kind}${c.slot + 1} ${c.what} ${c.from} -> ${c.to}`)
-    for (const p of r.perMember) console.log(`  ${p.name}: cost ${M(p.cost)} save ${p.saveDays} level ${p.levelDays.toFixed(1)}d`)
+    for (const p of r.perMember) console.log(`  ${p.name}: cost ${M(p.cost)} save ${p.saveDays} level ${p.levelDays.toFixed(1)}d charm ${p.charm}`)
     console.log(`  ready in ${r.readyDays} days; final ${M(r.final.profit)}/d deaths ${r.final.deaths}`)
   }
 } catch (e) {

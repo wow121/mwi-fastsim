@@ -44,7 +44,7 @@ function toggleHeld(v) {
 }
 const market = computed(() => result.value?.options.find(o => o.key === "market"))
 const best = computed(() => result.value?.options.find(o => o.key === result.value.best))
-const kindText = { market: "市场买", refine: "买普通版精炼", mirror: "镜子合成" }
+const kindText = { market: "市场买", refine: "买普通版精炼", unrefine: "买精炼版解精炼", mirror: "镜子合成" }
 </script>
 
 <template>
@@ -53,8 +53,8 @@ const kindText = { market: "市场买", refine: "买普通版精炼", mirror: "�
     <el-card>
       <p class="muted" style="margin-top: 0">
         选一件装备和强化等级，比较直接买、用贤者之镜合成（+N 主件 + 一件 +(N-1) 垫子 + 镜子 = +(N+1)，精炼版可以用普通版当垫子）、
-        买普通版自己精炼几种做法的花费，并列出最便宜做法要买的东西。低等级的主件和垫子也按最便宜的方式获取（可能又是镜子合成）。
-        手上已有同系列装备时，还会算拿它当主件、拿它当垫子的花费；不用它的做法按把它卖掉来算净花费。价格按市场最低卖价买、最高买价扣税卖。
+        买普通版自己精炼、买精炼版解精炼（拿回一半精炼材料）几种做法的花费，并列出最便宜做法要买的东西。低等级的主件和垫子也按最便宜的方式获取（可能又是镜子合成）。
+        手上已有同系列装备时，还会算拿它当主件、拿它当垫子（精炼版可以先解精炼）的花费；不用它的做法按把它卖掉来算净花费。价格按市场最低卖价买、最高买价扣税卖。
       </p>
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">装备</span>
@@ -85,7 +85,7 @@ const kindText = { market: "市场买", refine: "买普通版精炼", mirror: "�
         <div class="row">
           <b>{{ result.target.name }} +{{ result.target.level }}</b>
           <span v-if="result.held" class="muted">净花费 = 花费 − 手上装备扣税后能卖的钱（当主件 / 垫子用掉的做法不减）</span>
-          <span class="muted">市场：卖 {{ money(result.market.ask) }} / 收 {{ money(result.market.bid) }} · 镜子 {{ money(result.mirrorPrice) }}<template v-if="result.refine"> · 精炼材料 {{ money(result.refine.cost) }}</template><template v-if="result.held"> · 手上的 {{ result.held.name }} +{{ result.held.n }} 扣税能卖 {{ money(result.held.value) }}</template></span>
+          <span class="muted">市场：卖 {{ money(result.market.ask) }} / 收 {{ money(result.market.bid) }} · 镜子 {{ money(result.mirrorPrice) }}<template v-if="result.refine"> · 精炼材料 {{ money(result.refine.cost) }} · 解精炼返还 {{ money(result.refine.unrefineValue) }}</template><template v-if="result.held"> · 手上的 {{ result.held.name }} +{{ result.held.n }} 扣税能卖 {{ money(result.held.value) }}</template></span>
         </div>
       </template>
       <el-alert v-if="best" type="success" :closable="false" style="margin-bottom: 10px">

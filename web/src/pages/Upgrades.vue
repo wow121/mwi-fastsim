@@ -27,9 +27,11 @@ const hours = ref(12)
 const seeds = ref(8)
 const replacements = ref(true)
 const optimize = ref(members.value.map((_, i) => i))
-const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 5, maxLevelUp: 6, keepEnd: false }))
+const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 5, maxLevelUp: 6, keepEnd: false, houses: true, guild: true }))
 if (!plan.value.cash) plan.value.cash = {}
 if (!plan.value.other) plan.value.other = {}
+if (plan.value.houses == null) plan.value.houses = true
+if (plan.value.guild == null) plan.value.guild = true
 delete plan.value.budget
 delete plan.value.otherIncome
 watch(plan, v => save("fastsim-upgrade-plan", v), { deep: true })
@@ -43,7 +45,7 @@ function params() {
   const p = plan.value
   return {
     members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value, replacements: replacements.value, optimize: optimize.value,
-    budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd,
+    houses: p.houses !== false, guild: p.guild !== false, budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd,
   }
 }
 function onResult(r) {
@@ -61,9 +63,10 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
     <h2>整队提升规划</h2>
     <el-card>
       <p class="muted" style="margin-top: 0">
-        先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级）逐个模拟，得到每项每天多赚多少；
+        先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级、房子 +1～+3 级）逐个模拟，得到每项每天多赚多少；
         再按你的现金和每天收入排出购买顺序：钱够了就买，目标是规划期末的总资产（现金 + 身上装备按买一价扣税能卖的钱）最高。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
+        房子按升级材料的市场价加金币算，升上去卖不回来。公会加成花的是公会点数、整个公会一起生效，只在单项表里列出供参考，不进购买计划。
         获得装备的成本取最便宜的路线：直接买、贤者之镜合成（+N 加一件 +(N-1) 垫子加镜子 = +(N+1)，手上的装备可以当主件或垫子）、买普通版自己精炼。
       </p>
       <div class="row" style="margin-bottom: 8px"><TargetPicker v-model="target" /></div>
@@ -88,6 +91,8 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <span class="muted">每项</span><el-input-number v-model="hours" :min="1" :max="72" size="small" /><span class="muted">小时 ×</span>
         <el-input-number v-model="seeds" :min="2" :max="32" size="small" /><span class="muted">次配对</span>
         <el-checkbox v-model="replacements">包含换装</el-checkbox>
+        <el-checkbox v-model="plan.houses">包含房子</el-checkbox>
+        <el-checkbox v-model="plan.guild">列出公会加成</el-checkbox>
         <span class="muted">成员</span>
         <el-checkbox-group v-model="optimize" size="small">
           <el-checkbox v-for="(m, i) in members" :key="m.id" :value="i">{{ m.name }}</el-checkbox>
@@ -146,8 +151,10 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <el-table-column prop="memberName" label="角色" width="90" sortable />
         <el-table-column label="提升" min-width="230"><template #default="{ row }">{{ row.from }} → {{ row.label }}</template></el-table-column>
         <el-table-column prop="how" label="做法" min-width="170" />
-        <el-table-column prop="cost" label="花费" width="100" align="right" sortable><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
-        <el-table-column prop="loss" label="损耗" width="100" align="right" sortable><template #default="{ row }">{{ money(row.loss) }}</template></el-table-column>
+        <el-table-column prop="cost" label="花费" width="110" align="right" sortable>
+          <template #default="{ row }">{{ row.guild ? `${row.guildPoints.toLocaleString()} 公会点` : money(row.cost) }}</template>
+        </el-table-column>
+        <el-table-column prop="loss" label="损耗" width="100" align="right" sortable><template #default="{ row }">{{ row.guild ? "—" : money(row.loss) }}</template></el-table-column>
         <el-table-column prop="dProfitPerDay" label="全队利润/天" width="115" align="right" sortable>
           <template #default="{ row }"><span :class="row.dProfitPerDay > 0 ? 'good' : 'bad'">{{ sign(row.dProfitPerDay) }}</span></template>
         </el-table-column>

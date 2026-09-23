@@ -28,7 +28,7 @@ const extra = ref(defaultExtra())
 const plan = ref(load("fastsim-upgrade-plan", {}))
 for (const [k, d] of [["cash", {}], ["other", {}], ["tax", 5]]) if (plan.value[k] == null) plan.value[k] = d
 watch(plan, v => save("fastsim-upgrade-plan", { ...load("fastsim-upgrade-plan", {}), cash: v.cash, other: v.other, tax: v.tax }), { deep: true })
-const opts = ref(load("fastsim-goal-opts", { maxDeaths: 0.01, maxLevelUp: 8, replacements: true, levels: true, consumables: true }))
+const opts = ref(load("fastsim-goal-opts", { maxDeaths: 0.01, maxLevelUp: 8, replacements: true, levels: true, consumables: true, guild: false, charms: true }))
 watch(opts, v => save("fastsim-goal-opts", v), { deep: true })
 const optimize = ref(members.value.map((_, i) => i))
 const result = ref(null)
@@ -39,7 +39,7 @@ function params() {
   return {
     members: members.value, goal: goal.value, current: current.value, extra: extra.value, optimize: optimize.value,
     budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6),
-    tax: p.tax / 100, maxDeaths: opts.value.maxDeaths, maxLevelUp: opts.value.maxLevelUp, replacements: opts.value.replacements, levels: opts.value.levels !== false, consumables: opts.value.consumables !== false,
+    tax: p.tax / 100, maxDeaths: opts.value.maxDeaths, maxLevelUp: opts.value.maxLevelUp, replacements: opts.value.replacements, levels: opts.value.levels !== false, consumables: opts.value.consumables !== false, guild: !!opts.value.guild, charms: opts.value.charms !== false,
   }
 }
 const fmtDays = d => (d == null || !Number.isFinite(d) ? "—" : d < 0.05 ? "0" : d.toFixed(1))
@@ -52,7 +52,7 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
     <h2>目标区域提升</h2>
     <el-card>
       <p class="muted" style="margin-top: 0">
-        选一个现在打不动的目标（比如某个区域的高难度），找出能在目标上不死、并且比现在刷的地方日利高的综合提升里，<b>最快能做完的那一套</b>：装备（强化 / 精炼 / 镜子 / 按职业换装）、技能书、战斗等级、药品一起考虑。
+        选一个现在打不动的目标（比如某个区域的高难度），找出能在目标上不死、并且比现在刷的地方日利高的综合提升里，<b>最快能做完的那一套</b>：装备（强化 / 精炼 / 镜子 / 按职业换装）、技能书、房子、战斗等级、药品一起考虑；刷经验时戴哪种护符（决定经验主要分给哪个技能）也会一起挑。
         攒钱和刷经验是同时进行的：第 T 天时每个人能花「自己的现金 + T 天自己的收入」，等级是按当前经验和现在每天涨的经验刷 T 天后的等级。
         对一个天数 T，在各人的预算内从头挑最划算的装备组合（先减少死亡，再提高利润），看能不能达标；先粗试 0 / 7 / 30 / 90 / 180 天，再在不达标和达标之间二分找最短的 T。
         找到后去掉用不上的装备、把等级压到刚好够，按真正需要的东西算出最终天数。
@@ -73,6 +73,8 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
         <el-checkbox v-model="opts.replacements">包含换装</el-checkbox>
         <el-checkbox v-model="opts.levels">包含等级提升</el-checkbox>
         <el-checkbox v-model="opts.consumables">药品优化</el-checkbox>
+        <el-checkbox v-model="opts.charms">考虑换护符刷经验</el-checkbox>
+        <el-checkbox v-model="opts.guild">允许提升公会加成（公会点数，不花个人金币）</el-checkbox>
         <span class="muted">成员</span>
         <el-checkbox-group v-model="optimize" size="small">
           <el-checkbox v-for="(m, i) in members" :key="m.id" :value="i">{{ m.name }}</el-checkbox>
@@ -97,7 +99,7 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
         <el-table-column prop="slotName" label="位置" width="80" />
         <el-table-column label="变化" min-width="230"><template #default="{ row }">{{ row.from }} → <b>{{ row.to }}</b></template></el-table-column>
         <el-table-column prop="how" label="做法" min-width="220" />
-        <el-table-column label="花费" width="110" align="right"><template #default="{ row }">{{ row.kind === "level" ? "—" : money(row.cost) }}</template></el-table-column>
+        <el-table-column label="花费" width="110" align="right"><template #default="{ row }">{{ row.kind === "gear" || row.kind === "charm" ? money(row.cost) : "—" }}</template></el-table-column>
       </el-table>
       <template v-if="result.consumableChanges?.length">
         <h4 style="margin: 12px 0 4px">药品调整（{{ result.consumableChanges.length }} 项）</h4>
@@ -117,6 +119,7 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
         <el-table-column label="现在收入" width="110" align="right"><template #default="{ row }">{{ money(row.income) }}/天</template></el-table-column>
         <el-table-column label="攒钱" min-width="130"><template #default="{ row }">{{ days(row.saveDays) }}</template></el-table-column>
         <el-table-column label="刷经验" width="90" align="right"><template #default="{ row }">{{ fmtDays(row.levelDays) }} 天</template></el-table-column>
+        <el-table-column label="刷经验时的护符" min-width="150"><template #default="{ row }">{{ row.charm || "" }}</template></el-table-column>
         <el-table-column label="目标上日利" width="110" align="right"><template #default="{ row, $index }">{{ money(result.final.players[$index].profit) }}</template></el-table-column>
         <el-table-column label="目标上死亡" width="110" align="right"><template #default="{ row, $index }">{{ deaths(result.final.players[$index].deaths) }}</template></el-table-column>
       </el-table>
@@ -130,6 +133,9 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
             <el-table-column label="经验/天" width="100" align="right"><template #default="{ row }">{{ money(row.perDay) }}</template></el-table-column>
             <el-table-column label="+1 级" width="90" align="right"><template #default="{ row }">{{ fmtDays(row.days1) }} 天</template></el-table-column>
             <el-table-column label="+5 级" width="90" align="right"><template #default="{ row }">{{ fmtDays(row.days5) }} 天</template></el-table-column>
+            <el-table-column label="最快的护符" min-width="140"><template #default="{ row }">{{ row.bestCharm || "" }}</template></el-table-column>
+            <el-table-column label="戴它 +1 级" width="100" align="right"><template #default="{ row }">{{ row.bestCharm ? `${fmtDays(row.best1)} 天` : "" }}</template></el-table-column>
+            <el-table-column label="戴它 +5 级" width="100" align="right"><template #default="{ row }">{{ row.bestCharm ? `${fmtDays(row.best5)} 天` : "" }}</template></el-table-column>
           </el-table>
         </el-collapse-item>
         <el-collapse-item :title="`搜索过程（${result.steps.length} 步）`">

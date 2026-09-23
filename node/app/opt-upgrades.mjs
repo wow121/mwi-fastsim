@@ -84,7 +84,9 @@ export class GearPrices {
     for (const [b, r] of this.refs) if (r.after === h) base = b
     const r = this.refs.get(base)
     const refineCost = r ? r.inputs.reduce((s, i) => s + this.book.price(i.itemHrid, "ask") * (Number(i.count || 0) / r.outputCount) * ARTISAN, 0) : INF
-    return { base, refined: r?.after || null, refineCost }
+    // un-refining gives back half of the refining materials (valued at the bid, after tax)
+    const unrefineValue = r ? r.inputs.reduce((s, i) => s + this.book.price(i.itemHrid, "bid") * (Number(i.count || 0) / r.outputCount) * 0.5, 0) * (1 - this.tax) : 0
+    return { base, refined: r?.after || null, refineCost, unrefineValue }
   }
 
   quote(h, n) {
@@ -92,25 +94,37 @@ export class GearPrices {
     return { ask: q?.ask > 0 ? q.ask : INF, bid: q?.bid > 0 ? q.bid : 0 }
   }
 
-  /** acq(h)[n] = { cost, how, kind: "market" | "refine" | "mirror", pad? } (cheapest way to get it) */
+  /**
+   * acq(h)[n] = { cost, how, kind: "market" | "refine" | "unrefine" | "mirror", pad? }: the cheapest
+   * way to get it. The normal and refined versions of an item are computed together, level by
+   * level (refine and un-refine link them at the same level; mirrors use lower levels).
+   */
   acq(h) {
     if (this.tables.has(h)) return this.tables.get(h)
     const f = this.family(h)
-    const isRef = h === f.refined
-    const base = isRef ? this.acq(f.base) : null
-    const t = []
-    for (let n = 0; n <= this.cap; n++) {
-      let best = { cost: this.quote(h, n).ask, how: "市场买", kind: "market" }
-      if (isRef && base[n].cost + f.refineCost < best.cost) best = { cost: base[n].cost + f.refineCost, how: `买普通 +${n} 自己精炼`, kind: "refine" }
-      if (n >= 2) {
-        const p = this.padSource(h, n - 2, t)
-        const c = t[n - 1].cost + p.cost + this.mirror
-        if (c < best.cost) best = { cost: c, how: `+${n - 1} 加垫子 +${n - 2} 加镜子`, kind: "mirror", pad: p.h }
-      }
-      t.push(best)
+    const tb = []
+    const tr = f.refined ? [] : null
+    this.tables.set(f.base, tb)
+    if (tr) this.tables.set(f.refined, tr)
+    const mirror = (x, t, n) => {
+      if (n < 2) return null
+      const p = this.padSource(x, n - 2, t)
+      return { cost: t[n - 1].cost + p.cost + this.mirror, how: `+${n - 1} 加垫子 +${n - 2} 加镜子`, kind: "mirror", pad: p.h }
     }
-    this.tables.set(h, t)
-    return t
+    const better = (a, b) => (b && b.cost < a.cost ? b : a)
+    for (let n = 0; n <= this.cap; n++) {
+      let b = better({ cost: this.quote(f.base, n).ask, how: "市场买", kind: "market" }, mirror(f.base, tb, n))
+      tb.push(b)
+      if (!tr) continue
+      let r = better({ cost: this.quote(f.refined, n).ask, how: "市场买", kind: "market" }, mirror(f.refined, tr, n))
+      r = better(r, { cost: b.cost + f.refineCost, how: `买普通 +${n} 自己精炼`, kind: "refine" })
+      tr.push(r)
+      if (r.kind !== "refine") {
+        b = better(b, { cost: r.cost - f.unrefineValue, how: `买精炼 +${n} 解精炼（拿回一半材料）`, kind: "unrefine" })
+        tb[n] = b
+      }
+    }
+    return this.tables.get(h)
   }
 
   /** Cheapest pad of level k for upgrading h (normal version allowed for a refined item). */
@@ -137,6 +151,10 @@ export class GearPrices {
     if (a.kind === "refine") {
       const f = this.family(h)
       return [...this.recipe(f.base, n), { op: "refine", h: f.base, to: h, n, cost: f.refineCost }]
+    }
+    if (a.kind === "unrefine") {
+      const f = this.family(h)
+      return [...this.recipe(f.refined, n), { op: "unrefine", h: f.refined, to: h, n, cost: -f.unrefineValue }]
     }
     return [...this.recipe(h, n - 1), ...this.recipe(a.pad, n - 2), { op: "mirror", h, from: n - 1, pad: a.pad, padLevel: n - 2, cost: this.mirror }]
   }
@@ -169,6 +187,15 @@ export class GearPrices {
       const c = up(n0, n) + (h0 === h ? 0 : f.refineCost)
       const how = [n > n0 ? `镜子把手上的 +${n0} 升到 +${n}` : "", h0 === h ? "" : "自己精炼"].filter(Boolean).join("，")
       if (c < best.cost) best = { cost: c, how }
+    }
+    // un-refine the held refined piece, then use it as the normal main item
+    if (h0 === f.refined && h === f.base && n >= n0) {
+      const c = -f.unrefineValue + up(n0, n)
+      if (c < best.cost) best = { cost: c, how: `解精炼手上的 +${n0}（拿回一半材料）${n > n0 ? `，镜子升到 +${n}` : ""}` }
+    }
+    if (h0 === f.refined && h === f.base && n >= n0 + 2) {
+      const c = -f.unrefineValue + this.acq(h)[n0 + 1].cost + this.mirror + up(n0 + 2, n)
+      if (c < best.cost) best = { cost: c, how: `解精炼手上的 +${n0} 当垫子，买 +${n0 + 1} 加镜子${n > n0 + 2 ? `，再升到 +${n}` : ""}` }
     }
     // use the held piece as the pad: buy +(n0+1), then mirror up
     if ((h0 === h || h0 === f.base) && n >= n0 + 2) {
@@ -256,6 +283,82 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       value: () => 0,
     })
   })
+  // house rooms: +1..+maxHouseUp levels; cost = upgrade materials at the market ask + coins
+  if (opts.houses !== false) {
+    const up = Math.max(0, Math.floor(Number(opts.maxHouseUp ?? 3)))
+    for (const room of Object.values(maps.houseRoomDetailMap || {})) {
+      // "combat": only rooms with combat stats (levels / speeds / regen), not just rare find + wisdom
+      const types = [...(room.actionBuffs || []), ...(room.globalBuffs || [])].map(b => String(b.typeHrid))
+      if (opts.houses === "combat" && !types.some(t => /_level$|attack_speed|cast_speed|hp_regen|mp_regen/.test(t))) continue
+      const costs = room.upgradeCostsMap || {}
+      const max = Math.max(0, ...Object.keys(costs).map(Number))
+      const from = Math.max(0, Math.floor(Number(cfg.houseRooms?.[room.hrid] || 0)))
+      const levelCost = L => (costs[L] || []).reduce((sum, i) => {
+        const p = i.itemHrid === "/items/coin" ? 1 : book.priceOrShop(i.itemHrid, "ask")
+        return sum + (p > 0 ? p * Number(i.count || 0) : INF)
+      }, 0)
+      const stepCost = (a, b) => {
+        let c = 0
+        for (let L = a + 1; L <= b; L++) c += levelCost(L)
+        return c
+      }
+      const levels = []
+      for (let l = from; l <= Math.min(max, from + up); l++) if (l === from || stepCost(from, l) <= opts.maxSpend) levels.push(l)
+      if (levels.length < 2) continue
+      const name = zh(maps, room.hrid)
+      const states = levels.map(l => ({
+        label: `${name} ${l} 级`, level: l,
+        apply: c => { c.houseRooms = { ...(c.houseRooms || {}), [room.hrid]: l } },
+      }))
+      out.push({
+        key: `${idx}:house:${room.hrid}`, member: idx, memberName: who, slot: `house:${room.hrid}`, slotName: `房子·${name}`, states, house: true,
+        trans: (x, y) => (y.level > x.level ? { cost: stepCost(x.level, y.level), how: `升级房子（${x.level} → ${y.level} 级）` } : { cost: INF, how: "" }),
+        value: () => 0,
+      })
+    }
+  }
+  return out
+}
+
+// what each combat guild buff does (the site's name table has no entries for them)
+const GUILD_ZH = {
+  "/guild_buffs/force_combat": "伤害（公会）",
+  "/guild_buffs/rarity_combat": "稀有发现（公会）",
+  "/guild_buffs/scholar_combat": "经验（公会）",
+  "/guild_buffs/spirit_combat": "生命与法力上限（公会）",
+  "/guild_buffs/tempo_combat": "攻击与施法速度（公会）",
+}
+
+/**
+ * Guild buffs are shared by the guild and paid with guild points, not personal coins: one slot for
+ * the whole team (the level is raised for every member). cost = guild points.
+ */
+export function guildSlots(maps, members, opts = {}) {
+  const up = Math.max(0, Math.floor(Number(opts.maxGuildUp ?? 3)))
+  const out = []
+  for (const g of Object.values(maps.guildBuffDetailMap || {})) {
+    if (g.isCombat !== true) continue
+    const shrine = maps.guildShrineDetailMap?.[g.shrineHrid] || {}
+    const max = Math.max(0, Number(shrine.maxLevel || 0) || Math.max(0, ...Object.keys(g.levelCosts || {}).map(Number)))
+    const from = Math.max(0, ...members.map(c => Math.floor(Number(c.guildBuffs?.[g.hrid] || 0))))
+    const levels = []
+    for (let l = from; l <= Math.min(max, from + up); l++) levels.push(l)
+    if (levels.length < 2) continue
+    const points = (a, b) => {
+      let p = 0
+      for (let L = a + 1; L <= b; L++) p += Number(shrine.guildPointCosts?.[L] || 0)
+      return p
+    }
+    const name = GUILD_ZH[g.hrid] || (zh(maps, g.hrid) !== g.hrid ? zh(maps, g.hrid) : g.name || g.hrid)
+    out.push({
+      key: `guild:${g.hrid}`, hrid: g.hrid, name,
+      states: levels.map(l => ({
+        label: `${name} ${l} 级`, level: l,
+        apply: team => team.forEach(c => { c.guildBuffs = { ...(c.guildBuffs || {}), [g.hrid]: Math.max(l, Number(c.guildBuffs?.[g.hrid] || 0)) } }),
+      })),
+      points,
+    })
+  }
   return out
 }
 
@@ -364,7 +467,7 @@ export async function adviseUpgrades(ev, params, api) {
   const name = k => members[k].name || `队员${k + 1}`
   api.log(`当前全队利润 ${fmtM(P0)}/天，卖出税 ${(tax * 100).toFixed(1)}%，镜子 ${fmtM(gp.mirror)}`)
   members.forEach((_, k) => api.log(`  ${name(k)}：现金 ${fmtM(budget[k])}，战斗利润 ${fmtM(own[k])}/天，其他收入 ${fmtM(otherIncome[k])}/天`))
-  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, { maxSpend: budget[idx] + Math.max(0, income[idx]) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false }))
+  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, { maxSpend: budget[idx] + Math.max(0, income[idx]) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3 }))
   const jobs = slots.flatMap((sl, s) => sl.states.slice(1).map((st, k) => ({ s, j: k + 1, st })))
   api.log(`${slots.length} 个位置，共 ${jobs.length} 个可达状态需要模拟`)
   let done = 0
@@ -402,6 +505,27 @@ export async function adviseUpgrades(ev, params, api) {
       paybackDays: dp[s][j] > 0 ? loss / dp[s][j] : null,
     })
   }))
+  // guild buffs: guild points, shared by the guild -> listed for reference, not in the coin plans
+  if (params.guild !== false) {
+    const gs = guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 3 })
+    const gjobs = gs.flatMap(g => g.states.slice(1).map((st, k) => ({ g, j: k + 1, st })))
+    done = 0
+    const gevals = await pool(gjobs, 32, async ({ g, j, st }) => {
+      const mem = clone(members)
+      st.apply(mem)
+      const r = await ev.evaluate(mem, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
+      api.progress(++done, gjobs.length, "公会加成")
+      return { g, j, st, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: paired(r.perSeed, baseline.perSeed) }
+    })
+    for (const e of gevals) {
+      rows.push({
+        id: `${e.g.key}#${e.j}`, member: -1, memberName: "全队（公会）", slotName: "公会", from: e.g.states[0].label, label: e.st.label, guild: true,
+        cost: null, guildPoints: e.g.points(e.g.states[0].level, e.st.level), how: `公会升级（${e.g.points(e.g.states[0].level, e.st.level).toLocaleString()} 公会点数，不花个人金币）`,
+        loss: 0, dProfitPerDay: e.dp, dOwnPerDay: null, dXpPerHour: e.dXp, significance: e.sig,
+        net: Object.fromEntries(horizons.map(d => [d, e.dp * d])), paybackDays: null,
+      })
+    }
+  }
   rows.sort((a, b) => b.net[horizons.at(-1)] - a.net[horizons.at(-1)])
 
   // plans

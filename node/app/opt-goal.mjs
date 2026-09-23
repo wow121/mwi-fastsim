@@ -11,8 +11,9 @@
 import { hash53 } from "./hash.mjs"
 import { pool } from "./search.mjs"
 import { seedList } from "./evaluator.mjs"
-import { GearPrices, memberSlots } from "./opt-upgrades.mjs"
+import { GearPrices, guildSlots, memberSlots } from "./opt-upgrades.mjs"
 import { optimizeConsumables } from "./opt-consumables.mjs"
+import { zh } from "./i18n.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const INF = Number.POSITIVE_INFINITY
@@ -91,7 +92,19 @@ export async function planGoal(ev, params, api) {
   // gear / book states per slot (spending cap: own cash + 180 days of own income)
   const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, {
     maxSpend: budget[idx] + Math.max(0, income[idx]) * 180, maxLevelUp: params.maxLevelUp || 8, replacements: params.replacements !== false,
+    houses: params.houses === false ? false : "combat",
   }))
+  // guild buffs (opt-in): raised for the whole team, paid with guild points -> no personal coins
+  if (params.guild) {
+    for (const g of guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 5 })) {
+      slots.push({
+        key: g.key, member: -1, memberName: "全队（公会）", slotName: `公会·${g.name}`, states: g.states, guild: true,
+        trans: (a, b) => (b.level > a.level ? { cost: 0, how: `公会升到 ${b.level} 级（${g.points(a.level, b.level).toLocaleString()} 公会点数）` } : { cost: INF, how: "" }),
+        value: () => 0,
+      })
+    }
+  }
+  const applyState = (mem, s, j) => (slots[s].guild ? slots[s].states[j].apply(mem) : slots[s].states[j].apply(mem[slots[s].member]))
   const pay = slots.map(sl => sl.states.map(a => sl.states.map(b => (a === b ? { cost: 0, how: "" } : sl.trans(a, b)))))
   const held = slots.map(() => 0)
   // combat levels: target level per member / skill, days from the current experience
@@ -102,33 +115,73 @@ export async function planGoal(ev, params, api) {
     const e = Number(members[k].experience?.[s])
     return Number.isFinite(e) && e >= Number(xpTable[L] || 0) && e < Number(xpTable[L + 1] ?? INF) ? e : Number(xpTable[L] || 0)
   }
-  const levelDays = (k, s, to) => {
-    const rate = now.players[k].xp[s]
+  // charms: which one a member wears while farming decides how the experience is split (focus
+  // skill 70% + its bonus) -> options per member with the experience per day they give now
+  const charmOpts = members.map(() => null)
+  const charmSel = members.map(() => 0)
+  const rateOf = (k, s, c = charmSel[k]) => charmOpts[k]?.[c]?.rates[s] ?? now.players[k].xp[s]
+  const levelDays = (k, s, to, c = charmSel[k]) => {
+    const rate = rateOf(k, s, c)
     const need = Number(xpTable[to] ?? INF) - expOf(k, s)
     return need <= 0 ? 0 : rate > 0 ? need / rate : INF
   }
   const config = () => {
     const mem = clone(members)
-    held.forEach((j, s) => j && slots[s].states[j].apply(mem[slots[s].member]))
+    held.forEach((j, s) => j && applyState(mem, s, j))
     mem.forEach((c, k) => { c.levels = { ...c.levels, ...lv[k] } })
     return mem
   }
-  api.log(`${slots.length} 个装备 / 技能位置可提升${useLevels ? "，另加战斗等级" : ""}`)
+  api.log(`${slots.length} 个装备 / 技能书 / 房子${params.guild ? " / 公会" : ""}位置可提升${useLevels ? "，另加战斗等级" : ""}`)
 
   await tuneConsumables("开始")
   const ok = st => st.deaths <= maxDeaths + 1e-9 && st.profit > ref
   const fmtT = T => (Number.isInteger(T) ? String(T) : T.toFixed(1))
   const spent = members.map(() => 0)
   const budgetAt = (k, T) => budget[k] + Math.max(0, income[k]) * T
-  const levelAt = (k, s, T) => {
+  const levelAt = (k, s, T, c = charmSel[k]) => {
     let L = lv0[k][s]
-    while (L + 1 < xpTable.length && levelDays(k, s, L + 1) <= T + 1e-9) L++
+    while (L + 1 < xpTable.length && levelDays(k, s, L + 1, c) <= T + 1e-9) L++
     return L
+  }
+  const levelsWith = (k, c, T) => Object.fromEntries(SKILLS.map(s => [s, levelAt(k, s, T, c)]))
+  if (useLevels && params.charms !== false) {
+    const TIERS = ["trainee", "basic", "advanced", "expert", "master", "grandmaster"]
+    const nm = h => zh(maps, h)
+    const jobs = []
+    for (const k of optimize) {
+      const cur = members[k].equipment?.charm?.itemHrid || ""
+      const list = [{ hrid: cur, label: cur ? `${nm(cur)}（现在戴的）` : "不戴护符（现在）", cost: 0, rates: now.players[k].xp, current: true }]
+      for (const sk of SKILLS) for (const t of TIERS) {
+        const h = `/items/${t}_${sk}_charm`
+        const it = maps.itemDetailMap[h]
+        if (!it || h === cur) continue
+        const req = it.equipmentDetail?.levelRequirements || []
+        if (req.some(q => Number(members[k].levels?.[String(q.skillHrid).split("/").pop()] || 1) < Number(q.level || 0))) continue
+        const price = gp.quote(h, 0).ask
+        if (!(price < INF)) continue
+        const o = { hrid: h, label: nm(h), cost: price, rates: null }
+        list.push(o)
+        jobs.push({ k, o })
+      }
+      charmOpts[k] = list
+    }
+    let done = 0
+    await pool(jobs, 48, async ({ k, o }) => {
+      const mem = clone(members)
+      mem[k].equipment = { ...mem[k].equipment, charm: { itemHrid: o.hrid, enhancementLevel: 0 } }
+      o.rates = stat(await run(mem, params.current, main)).players[k].xp
+      api.progress(++done, jobs.length, "护符经验")
+    })
+    for (const k of optimize) {
+      const best = SKILLS.map(sk => charmOpts[k].reduce((a, o) => (o.rates[sk] > a.rates[sk] ? o : a)))
+      api.log(`  ${name(k)} 各技能最快的护符：${SKILLS.filter(sk => now.players[k].xp[sk] > 0).map((sk, i) => `${SKILL_ZH[sk]} ${M(best[SKILLS.indexOf(sk)].rates[sk])}/天`).join("，")}`)
+    }
   }
   // one attempt: from scratch, with T days of cash / income / experience; greedy on the target
   const attempt = async (T) => {
     held.fill(0)
     spent.fill(0)
+    charmSel.fill(0)
     for (const k of members.keys()) lv[k] = { ...lv0[k] }
     if (useLevels) for (const k of optimize) for (const s of SKILLS) lv[k][s] = levelAt(k, s, T)
     const log = []
@@ -149,9 +202,23 @@ export async function planGoal(ev, params, api) {
       const cands = []
       slots.forEach((sl, s) => sl.states.forEach((st, j) => {
         const c = pay[s][held[s]][j]
-        if (j === held[s] || !(c.cost < INF) || spent[sl.member] + c.cost > budgetAt(sl.member, T)) return
+        if (j === held[s] || !(c.cost < INF)) return
+        if (sl.guild) return cands.push({ s, j, member: -1, cost: 0, how: c.how, days: 0 })
+        if (spent[sl.member] + c.cost > budgetAt(sl.member, T)) return
         cands.push({ s, j, member: sl.member, cost: c.cost, how: c.how, days: Math.max(0, c.cost) / perDay(sl.member) })
       }))
+      // wearing another charm while farming: different levels after T days (one option per result)
+      for (const k of optimize) {
+        const seen = new Set([JSON.stringify(lv[k])])
+        const opts = (charmOpts[k] || []).map((o, c) => ({ o, c })).filter(x => x.c !== charmSel[k]).sort((a, b) => a.o.cost - b.o.cost)
+        for (const { o, c } of opts) {
+          const nl = levelsWith(k, c, T)
+          const key = JSON.stringify(nl)
+          if (seen.has(key) || spent[k] + o.cost > budgetAt(k, T)) continue
+          seen.add(key)
+          cands.push({ kind: "charm", member: k, c, levels: nl, cost: o.cost, how: `刷经验时戴 ${o.label}`, days: o.cost / perDay(k) })
+        }
+      }
       if (!cands.length) {
         why = "预算内没有可买的"
         break
@@ -163,7 +230,8 @@ export async function planGoal(ev, params, api) {
       const rate = c => c.gain / Math.max(c.days, 0.05)
       const tryCand = (c) => {
         const mem = config()
-        slots[c.s].states[c.j].apply(mem[slots[c.s].member])
+        if (c.kind === "charm") mem[c.member].levels = { ...mem[c.member].levels, ...c.levels }
+        else applyState(mem, c.s, c.j)
         return mem
       }
       // rare deaths need longer runs to be told apart
@@ -219,17 +287,17 @@ export async function planGoal(ev, params, api) {
         const bundle = []
         const cost = members.map(() => 0)
         for (const c of [...fine].sort((a, b) => b.gain - a.gain)) {
-          if (bundle.length >= 3 || bundle.some(x => x.s === c.s)) continue
-          if (spent[c.member] + cost[c.member] + c.cost > budgetAt(c.member, T)) continue
+          if (c.kind === "charm" || bundle.length >= 3 || bundle.some(x => x.s === c.s)) continue
+          if (c.member >= 0 && spent[c.member] + cost[c.member] + c.cost > budgetAt(c.member, T)) continue
           bundle.push(c)
-          cost[c.member] += c.cost
+          if (c.member >= 0) cost[c.member] += c.cost
         }
         if (bundle.length < 2) {
           why = "复核后单项都没改善"
           break
         }
         const mem = config()
-        for (const c of bundle) slots[c.s].states[c.j].apply(mem[slots[c.s].member])
+        for (const c of bundle) applyState(mem, c.s, c.j)
         const st = stat(await run(mem, goal, fineCfg))
         if (!(score(st, base1) > 0)) {
           why = "复核后单项和组合都没改善"
@@ -239,23 +307,32 @@ export async function planGoal(ev, params, api) {
           const sl = slots[c.s]
           log.push({ T, memberName: sl.memberName, what: `${sl.slotName}：${sl.states[held[c.s]].label} → ${sl.states[c.j].label}`, cost: c.cost, days: c.days, how: `${c.how}（组合）`, phase, after: st })
           held[c.s] = c.j
-          spent[c.member] += c.cost
+          if (c.member >= 0) spent[c.member] += c.cost
         }
         best = { ...bundle.at(-1), st, how: `${bundle.at(-1).how}（组合）` }
       }
-      const sl = slots[best.s]
-      log.push({ T, memberName: sl.memberName, what: `${sl.slotName}：${sl.states[held[best.s]].label} → ${sl.states[best.j].label}`, cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
-      held[best.s] = best.j
-      spent[best.member] += best.cost
+      if (best.kind === "charm") {
+        const k = best.member
+        log.push({ T, memberName: name(k), what: `护符（刷经验时）：${charmOpts[k][charmSel[k]].label} → ${charmOpts[k][best.c].label}`, cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
+        spent[k] += best.cost
+        charmSel[k] = best.c
+        lv[k] = { ...lv[k], ...best.levels }
+      } else {
+        const sl = slots[best.s]
+        log.push({ T, memberName: sl.memberName, what: `${sl.slotName}：${sl.states[held[best.s]].label} → ${sl.states[best.j].label}`, cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
+        held[best.s] = best.j
+        if (best.member >= 0) spent[best.member] += best.cost
+      }
       curMain = best.st
     }
     const last = checked || curMain
     api.log(`试 ${fmtT(T)} 天（可花 ${optimize.map(k => `${name(k)} ${M(budgetAt(k, T))}`).join("，")}${useLevels ? `；等级 ${optimize.map(k => SKILLS.filter(s => lv[k][s] > lv0[k][s]).map(s => `${SKILL_ZH[s]}+${lv[k][s] - lv0[k][s]}`).join("/") || "不变").join("，")}` : ""}）：${checked ? "能达标" : `达不到${why ? `（${why}）` : ""}`}，${log.length} 步，死亡 ${last.deaths.toFixed(3)}/小时，${M(last.profit)}/天`)
-    return { T, checked, steps: log, held: [...held], lv: lv.map(x => ({ ...x })), spent: [...spent] }
+    return { T, checked, steps: log, held: [...held], lv: lv.map(x => ({ ...x })), spent: [...spent], charmSel: [...charmSel] }
   }
   const restore = a => {
     a.held.forEach((j, s) => { held[s] = j })
     a.lv.forEach((x, k) => { lv[k] = { ...x } })
+    a.charmSel.forEach((c, k) => { charmSel[k] = c })
   }
 
   // shortest T: coarse grid, then bisection between the last miss and the first hit
@@ -295,10 +372,7 @@ export async function planGoal(ev, params, api) {
     })
     // shorten the time: drop gear that is not needed and lower levels as far as the goal allows,
     // the item that sets the finishing time first
-    const gearDays = s => {
-      const k = slots[s].member
-      return Math.max(0, pay[s][0][held[s]].cost) / perDay(k)
-    }
+    const gearDays = s => (slots[s].guild ? 0 : Math.max(0, pay[s][0][held[s]].cost) / perDay(slots[s].member))
     const undo = [
       ...held.map((j, s) => ({ j, s })).filter(x => x.j).map(({ s }) => ({ kind: "gear", s, days: gearDays(s) })),
       ...optimize.flatMap(k => SKILLS.filter(s => lv[k][s] > lv0[k][s]).map(s => ({ kind: "level", k, s, days: levelDays(k, s, lv[k][s]) }))),
@@ -334,19 +408,50 @@ export async function planGoal(ev, params, api) {
 
   // what to do, per member: gear straight from the original state, levels from now
   const perMember = members.map((_, k) => ({ name: name(k), cost: 0, cash: budget[k], income: income[k], levelDays: 0 }))
+  const gearCost = members.map(() => 0)
+  held.forEach((j, s) => {
+    if (j && !slots[s].guild) gearCost[slots[s].member] += pay[s][0][j].cost
+  })
+  // the charm to farm the needed levels with: the one that finishes first (levels vs saving up)
+  for (const k of optimize) {
+    if (!charmOpts[k]) continue
+    const need = SKILLS.filter(sk => lv[k][sk] > lv0[k][sk])
+    let bestC = 0
+    let bestDays = INF
+    charmOpts[k].forEach((o, c) => {
+      const lvDays = Math.max(0, ...need.map(sk => levelDays(k, sk, lv[k][sk], c)))
+      const cost = gearCost[k] + o.cost
+      const save = cost <= budget[k] ? 0 : income[k] > 0 ? (cost - budget[k]) / income[k] : INF
+      const d = Math.max(lvDays, save)
+      if (d < bestDays - 1e-9 || (Math.abs(d - bestDays) <= 1e-9 && o.cost < charmOpts[k][bestC].cost)) {
+        bestDays = d
+        bestC = c
+      }
+    })
+    charmSel[k] = need.length ? bestC : 0
+  }
   const changes = []
   held.forEach((j, s) => {
     if (!j) return
     const sl = slots[s]
     const t = pay[s][0][j]
+    if (sl.guild) return changes.push({ kind: "guild", memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, to: sl.states[j].label, cost: 0, how: t.how })
     perMember[sl.member].cost += t.cost
     changes.push({ kind: "gear", memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, to: sl.states[j].label, cost: t.cost, how: t.how })
+  })
+  members.forEach((_, k) => {
+    const o = charmOpts[k]?.[charmSel[k]]
+    if (o && !o.current) {
+      perMember[k].cost += o.cost
+      changes.push({ kind: "charm", memberName: name(k), slotName: "护符（刷经验时）", from: charmOpts[k][0].label, to: o.label, cost: o.cost, how: "买来戴着在现在的地方刷经验，练到需要的等级（到目标区域后可以换回）" })
+    }
+    perMember[k].charm = o ? o.label : null
   })
   members.forEach((_, k) => SKILLS.forEach(s => {
     if (lv[k][s] <= lv0[k][s]) return
     const d = levelDays(k, s, lv[k][s])
     perMember[k].levelDays = Math.max(perMember[k].levelDays, d)
-    changes.push({ kind: "level", memberName: name(k), slotName: SKILL_ZH[s], from: `Lv.${lv0[k][s]}`, to: `Lv.${lv[k][s]}`, cost: 0, how: `现在的地方刷 ${d.toFixed(1)} 天（${M(now.players[k].xp[s])} 经验/天）`, days: d })
+    changes.push({ kind: "level", memberName: name(k), slotName: SKILL_ZH[s], from: `Lv.${lv0[k][s]}`, to: `Lv.${lv[k][s]}`, cost: 0, how: `现在的地方刷 ${d.toFixed(1)} 天（${M(rateOf(k, s))} 经验/天${charmOpts[k] && !charmOpts[k][charmSel[k]].current ? `，戴${charmOpts[k][charmSel[k]].label}` : ""}）`, days: d })
   }))
   for (const p of perMember) {
     p.saveDays = p.cost <= p.cash ? 0 : p.income > 0 ? (p.cost - p.cash) / p.income : null
@@ -358,7 +463,13 @@ export async function planGoal(ev, params, api) {
     ? `达标：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时；共 ${changes.length} 项，约 ${readyDays == null ? "?" : readyDays.toFixed(1)} 天能全部做完`
     : `没能达标：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时`)
   const levelOptions = members.flatMap((c, k) => SKILLS.filter(s => now.players[k].xp[s] > 0).map(s => ({
-    memberName: name(k), skill: SKILL_ZH[s], level: lv0[k][s], perDay: now.players[k].xp[s], days1: levelDays(k, s, lv0[k][s] + 1), days5: levelDays(k, s, lv0[k][s] + 5),
+    memberName: name(k), skill: SKILL_ZH[s], level: lv0[k][s], perDay: now.players[k].xp[s], days1: levelDays(k, s, lv0[k][s] + 1, 0), days5: levelDays(k, s, lv0[k][s] + 5, 0),
+    ...(() => {
+      if (!charmOpts[k]) return {}
+      let c = 0
+      charmOpts[k].forEach((o, i) => { if (o.rates[s] > charmOpts[k][c].rates[s]) c = i })
+      return { bestCharm: charmOpts[k][c].label, bestPerDay: charmOpts[k][c].rates[s], best1: levelDays(k, s, lv0[k][s] + 1, c), best5: levelDays(k, s, lv0[k][s] + 5, c) }
+    })(),
   })))
   return {
     levelOptions, reached, now, start, final: cur, ref, maxDeaths, perMember, changes, removed, readyDays,

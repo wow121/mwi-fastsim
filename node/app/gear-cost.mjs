@@ -1,7 +1,8 @@
 // Gear cost: the cheapest way to get an item at an enhancement level — buy it on the market,
 // Philosopher's Mirror synthesis (+N main + a +(N-1) pad + a mirror = +(N+1); the pad of a refined
-// item may be the normal version), or buy the normal version and refine it — optionally starting
-// from a piece the player already has (sell it, mirror it up as the main item, or use it as a pad).
+// item may be the normal version), buy the normal version and refine it, or buy the refined version
+// and un-refine it (half of the refining materials come back) — optionally starting from a piece
+// the player already has (sell it, mirror it up as the main item, use it as a pad, un-refine it).
 import { GearPrices } from "./opt-upgrades.mjs"
 import { zh } from "./i18n.mjs"
 
@@ -25,6 +26,7 @@ function describe(game, gp, steps) {
       refines++
       return { text: `精炼 ${nm(s.h)} +${s.n} → ${nm(s.to)} +${s.n}`, cost: s.cost }
     }
+    if (s.op === "unrefine") return { text: `解精炼 ${nm(s.h)} +${s.n} → ${nm(s.to)} +${s.n}（拿回一半精炼材料）`, cost: s.cost }
     if (s.op === "keep") return { text: `手上的 ${nm(s.h)} +${s.n}`, cost: 0 }
     mirrors++
     return { text: `镜子：${nm(s.h)} +${s.from}（主件）+ ${nm(s.pad)} +${s.padLevel}（垫子）→ +${s.from + 1}`, cost: s.cost }
@@ -95,6 +97,19 @@ export function gearCost(game, book, params) {
       const up = mirrorUp(gp, held.h === h ? h : f.base, held.n, n)
       if (up) add("main", `手上的 +${held.n} 当主件${n > held.n ? "用镜子升级" : ""}${held.h === h ? "" : "，再精炼"}`, [{ op: "keep", h: held.h, n: held.n }, ...up, ...(held.h === h ? [] : [{ op: "refine", h: f.base, to: h, n, cost: f.refineCost }])])
     }
+    // held refined piece, normal target: un-refine it, then main item or pad
+    if (same && held.h === f.refined && h === f.base) {
+      const unref = { op: "unrefine", h: f.refined, to: f.base, n: held.n, cost: -f.unrefineValue }
+      if (n >= held.n) {
+        const up = mirrorUp(gp, h, held.n, n)
+        if (up) add("unrefine-main", `解精炼手上的 +${held.n}${n > held.n ? "，再用镜子升级" : ""}`, [{ op: "keep", h: held.h, n: held.n }, unref, ...up])
+      }
+      if (n >= held.n + 2) {
+        const main = gp.recipe(h, held.n + 1)
+        const up = mirrorUp(gp, h, held.n + 2, n)
+        if (main && up) add("unrefine-pad", `解精炼手上的 +${held.n} 当垫子（买 +${held.n + 1} 当主件）`, [{ op: "keep", h: held.h, n: held.n }, unref, ...main, { op: "mirror", h, from: held.n + 1, pad: f.base, padLevel: held.n, cost: gp.mirror }, ...up])
+      }
+    }
     if (same && (held.h === h || held.h === f.base) && n >= held.n + 2) {
       const main = gp.recipe(h, held.n + 1)
       const up = mirrorUp(gp, h, held.n + 2, n)
@@ -104,7 +119,7 @@ export function gearCost(game, book, params) {
   // net cost: routes that do not use the held piece leave it to be sold
   const heldValue = held && maps.itemDetailMap[held.h] ? gp.value(held.h, held.n) : 0
   for (const o of options) {
-    o.usesHeld = o.key === "main" || o.key === "pad"
+    o.usesHeld = ["main", "pad", "unrefine-main", "unrefine-pad"].includes(o.key)
     o.net = o.cost == null ? null : o.usesHeld ? o.cost : o.cost - heldValue
   }
   const ok = options.filter(o => o.net != null)
@@ -130,6 +145,7 @@ export function gearCost(game, book, params) {
     mirrorPrice: fin(gp.mirror),
     refine: r ? {
       cost: fin(f.refineCost),
+      unrefineValue: fin(f.unrefineValue),
       inputs: r.inputs.map(i => ({ hrid: i.itemHrid, name: nm(i.itemHrid), count: (Number(i.count || 0) / r.outputCount) * ARTISAN, price: book.price(i.itemHrid, "ask") })),
     } : null,
     held: held ? { ...held, name: nm(held.h), value: heldValue } : null,
