@@ -118,6 +118,10 @@ userscript/        油猴脚本
 | `node check-prims.mjs` | Rust 的随机数和 `pow` 与 V8 逐位比对 |
 | `node smoke.mjs` 等 | 接口和各优化器的端到端测试（另有 `test-upgrades.mjs`、`test-goal.mjs`、`test-gear-cost.mjs`） |
 
+## 反馈
+
+如需反馈，游戏中私聊 **Dawant**，有空会处理。
+
 ## 致谢与声明
 
 - 战斗引擎移植自[新战斗模拟](https://combat.43.167.210.211.sslip.io)网站的模拟引擎（`combat-events-2.3.0`），

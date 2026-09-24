@@ -81,6 +81,7 @@ const menu = [
           <span> · </span>
           <el-link :href="REPO_URL" target="_blank">GitHub</el-link>
         </div>
+        <div>如需反馈，游戏中私聊 Dawant，有空会处理</div>
       </div>
     </el-aside>
     <el-main style="padding: 0">
