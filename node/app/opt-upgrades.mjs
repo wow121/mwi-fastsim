@@ -345,33 +345,54 @@ const GUILD_ZH = {
 }
 
 /**
- * Guild buffs are shared by the guild and paid with guild points, not personal coins: one slot for
- * the whole team (the level is raised for every member). cost = guild points.
+ * Guild buffs: one slot for the whole team (each member's buff is raised to the slot's level).
+ * A member's level can't go above their guild's shrine level (`guildBuffCaps`, read from the
+ * game); a member without it (teammates' profiles don't show it) is assumed to be in the same
+ * guild as the known ones, and stays where it is when nobody's is known. The personal upgrade is
+ * paid with guild tokens and credits, not coins, so it's listed apart from the coin plans.
  */
 export function guildSlots(maps, members, opts = {}) {
   const up = Math.max(0, Math.floor(Number(opts.maxGuildUp ?? 3)))
   const out = []
   for (const g of Object.values(maps.guildBuffDetailMap || {})) {
     if (g.isCombat !== true) continue
-    const shrine = maps.guildShrineDetailMap?.[g.shrineHrid] || {}
-    const max = Math.max(0, Number(shrine.maxLevel || 0) || Math.max(0, ...Object.keys(g.levelCosts || {}).map(Number)))
-    const from = Math.max(0, ...members.map(c => Math.floor(Number(c.guildBuffs?.[g.hrid] || 0))))
+    const cur = c => Math.floor(Number(c.guildBuffs?.[g.hrid] || 0))
+    const known = members.map(c => c.guildBuffCaps?.[g.hrid]).filter(v => Number.isFinite(Number(v))).map(Number)
+    const teamCap = known.length ? Math.min(...known) : null
+    const cap = c => {
+      const own = Number(c.guildBuffCaps?.[g.hrid])
+      return Math.max(cur(c), Number.isFinite(own) ? own : teamCap ?? cur(c))
+    }
+    const from = Math.max(0, ...members.map(cur))
     const levels = []
-    for (let l = from; l <= Math.min(max, from + up); l++) levels.push(l)
+    for (let l = from; l <= Math.min(Math.max(...members.map(cap)), from + up); l++) levels.push(l)
     if (levels.length < 2) continue
-    const points = (a, b) => {
-      let p = 0
-      for (let L = a + 1; L <= b; L++) p += Number(shrine.guildPointCosts?.[L] || 0)
-      return p
+    const target = (c, l) => Math.max(cur(c), Math.min(l, cap(c)))
+    // guild tokens and credits all raised members pay together
+    const cost = l => {
+      let tokens = 0
+      const credits = {}
+      for (const c of members)
+        for (let L = cur(c) + 1; L <= target(c, l); L++) {
+          const lc = g.levelCosts?.[L] || {}
+          tokens += Number(lc.guildTokenCost || 0)
+          for (const x of lc.creditCosts || []) credits[x.itemHrid] = (credits[x.itemHrid] || 0) + Number(x.count || 0)
+        }
+      return { tokens, credits }
     }
     const name = GUILD_ZH[g.hrid] || (zh(maps, g.hrid) !== g.hrid ? zh(maps, g.hrid) : g.name || g.hrid)
     out.push({
       key: `guild:${g.hrid}`, hrid: g.hrid, name,
       states: levels.map(l => ({
         label: `${name} ${l} 级`, level: l,
-        apply: team => team.forEach(c => { c.guildBuffs = { ...(c.guildBuffs || {}), [g.hrid]: Math.max(l, Number(c.guildBuffs?.[g.hrid] || 0)) } }),
+        apply: team => team.forEach(c => { c.guildBuffs = { ...(c.guildBuffs || {}), [g.hrid]: target(c, l) } }),
       })),
-      points,
+      cost,
+      costText: l => {
+        const { tokens, credits } = cost(l)
+        const cr = Object.entries(credits).map(([h, n]) => `${zh(maps, h)} ${n.toLocaleString()}`).join("、")
+        return `${tokens.toLocaleString()} 公会代币${cr ? ` + ${cr}` : ""}`
+      },
     })
   }
   return out
@@ -507,6 +528,48 @@ export async function adviseUpgrades(ev, params, api) {
   const Lend = params.keepEnd && tax < 1 ? L.map(r => r.map(v => v / (1 - tax))) : L
   const pay = slots.map(sl => sl.states.map(a => sl.states.map(b => (a === b ? { cost: 0, how: "" } : sl.trans(a, b)))))
 
+  // Second pass. For a strong team one upgrade is often ~1% of its profit, about the size of the
+  // screening's error, and picking the best of hundreds of noisy estimates favours the lucky ones:
+  // the plan then swings with any small change of the team. Re-simulate the states that could pay
+  // off within the longest horizon (optimistic screening estimate) with more, fresh seeds, and plan
+  // with those numbers only; the rest stay in the table as screening results.
+  const H = horizons.at(-1)
+  const refineHours = Math.min(48, hours * 2)
+  const refineSeeds = seedList(55555, Math.min(64, seeds.length * 4))
+  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 40)))
+  const optimistic = (s, j) => (dp[s][j] + 3 * (info[s][j]?.sig?.se ?? 0) * 24) * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
+  const picks = jobs.filter(({ s, j }) => pay[s][0][j].cost < INF && optimistic(s, j) > 0)
+    .sort((a, b) => optimistic(b.s, b.j) - optimistic(a.s, a.j)).slice(0, refineTop)
+  const refined = slots.map(sl => sl.states.map(() => false))
+  const planDp = slots.map(sl => sl.states.map(() => 0))
+  const planDpv = slots.map(sl => sl.states.map(() => members.map(() => 0)))
+  let refBase = baseline
+  if (picks.length) {
+    api.log(`复核 ${picks.length} 个可能划算的提升（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
+    refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
+    done = 0
+    const again = await pool(picks, 32, async ({ s, j, st }) => {
+      const mem = clone(members)
+      st.apply(mem[slots[s].member])
+      const r = await ev.evaluate(mem, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
+      api.progress(++done, picks.length, "复核")
+      const dpv = r.mean.players.map((p, k) => (p.profitPerHour - refBase.mean.players[k].profitPerHour) * 24)
+      return { s, j, dpv, dp: (r.mean.profitPerHour - refBase.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - refBase.mean.xpPerHour, sig: paired(r.perSeed, refBase.perSeed) }
+    })
+    for (const e of again) {
+      dp[e.s][e.j] = planDp[e.s][e.j] = e.dp
+      dpv[e.s][e.j] = planDpv[e.s][e.j] = e.dpv
+      info[e.s][e.j] = e
+      refined[e.s][e.j] = true
+    }
+  } else if (!refineTop) {
+    // re-check turned off: plan with the screening numbers
+    slots.forEach((sl, s) => sl.states.forEach((_, j) => {
+      planDp[s][j] = dp[s][j]
+      planDpv[s][j] = dpv[s][j]
+    }))
+  } else api.log("初筛没有找到可能在规划期内回本的提升")
+
   // per-state table (from the current state)
   const rows = []
   slots.forEach((sl, s) => sl.states.forEach((st, j) => {
@@ -515,12 +578,12 @@ export async function adviseUpgrades(ev, params, api) {
     const loss = t.cost - L[s][j] + L[s][0]
     rows.push({
       id: `${sl.key}#${j}`, member: sl.member, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, label: st.label,
-      cost: t.cost, how: t.how, loss, dProfitPerDay: dp[s][j], dOwnPerDay: dpv[s][j][sl.member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig,
+      cost: t.cost, how: t.how, loss, dProfitPerDay: dp[s][j], dOwnPerDay: dpv[s][j][sl.member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig, refined: refined[s][j],
       net: Object.fromEntries(horizons.map(d => [d, dp[s][j] * d - loss])),
       paybackDays: dp[s][j] > 0 ? loss / dp[s][j] : null,
     })
   }))
-  // guild buffs: guild points, shared by the guild -> listed for reference, not in the coin plans
+  // guild buffs: guild tokens and credits, not coins -> listed for reference, not in the coin plans
   if (params.guild !== false) {
     const gs = guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 3 })
     const gjobs = gs.flatMap(g => g.states.slice(1).map((st, k) => ({ g, j: k + 1, st })))
@@ -535,7 +598,7 @@ export async function adviseUpgrades(ev, params, api) {
     for (const e of gevals) {
       rows.push({
         id: `${e.g.key}#${e.j}`, member: -1, memberName: "全队（公会）", slotName: "公会", from: e.g.states[0].label, label: e.st.label, guild: true,
-        cost: null, guildPoints: e.g.points(e.g.states[0].level, e.st.level), how: `公会升级（${e.g.points(e.g.states[0].level, e.st.level).toLocaleString()} 公会点数，不花个人金币）`,
+        cost: null, guildTokens: e.g.cost(e.st.level).tokens, how: `个人公会加成升级（${e.g.costText(e.st.level)}，不花金币）`,
         loss: 0, dProfitPerDay: e.dp, dOwnPerDay: null, dXpPerHour: e.dXp, significance: e.sig,
         net: Object.fromEntries(horizons.map(d => [d, e.dp * d])), paybackDays: null,
       })
@@ -548,7 +611,7 @@ export async function adviseUpgrades(ev, params, api) {
   for (const days of horizons) {
     if (api.signal.aborted) throw new Error("cancelled")
     api.progress(0, 1, `规划 ${days} 天`)
-    const P = { slots, dp, dpv, L, Lend, pay, budget, income, days }
+    const P = { slots, dp: planDp, dpv: planDpv, L, Lend, pay, budget, income, days }
     const ts = Date.now()
     const r = await searchPlan(P, api.signal)
     api.log(`规划 ${days} 天用时 ${Date.now() - ts} ms`)
@@ -557,14 +620,15 @@ export async function adviseUpgrades(ev, params, api) {
     r.held.forEach((j, s) => j && slots[s].states[j].apply(mem[slots[s].member]))
     let check = null
     if (r.steps.length) {
-      const f = await ev.evaluate(mem, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
-      check = { estimated: r.income - income.reduce((a, v) => a + v, 0), actual: (f.mean.profitPerHour - baseline.mean.profitPerHour) * 24, sig: paired(f.perSeed, baseline.perSeed) }
+      // measured at the precision of the baseline it is paired with
+      const f = await ev.evaluate(mem, target, picks.length ? { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal } : { hours, seeds, extra, objective: "profit", signal: api.signal })
+      check = { estimated: r.income - income.reduce((a, v) => a + v, 0), actual: (f.mean.profitPerHour - refBase.mean.profitPerHour) * 24, sig: paired(f.perSeed, refBase.perSeed) }
     }
     const steps = r.steps.map(x => {
       const sl = slots[x.s]
       return {
         day: x.day, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[x.from].label, to: sl.states[x.to].label,
-        cost: x.cost, how: x.how, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: dp[x.s][x.to] - dp[x.s][x.from],
+        cost: x.cost, how: x.how, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: planDp[x.s][x.to] - planDp[x.s][x.from],
         loss: x.cost - L[x.s][x.to] + L[x.s][x.from],
       }
     })
@@ -573,7 +637,7 @@ export async function adviseUpgrades(ev, params, api) {
     plans.push({ days, wealth: r.wealth, idle, gain: r.wealth - idle, steps, final, check, finalIncome: r.income, perMember, members: mem })
     api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
   }
-  return { keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length }
+  return { keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length, refineHours, refineSeeds: refineSeeds.length, refinedCount: picks.length, refineTop }
 }
 
 function fmtM(v) {

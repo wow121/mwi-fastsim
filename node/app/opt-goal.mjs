@@ -94,12 +94,12 @@ export async function planGoal(ev, params, api) {
     maxSpend: budget[idx] + Math.max(0, income[idx]) * 180, maxLevelUp: params.maxLevelUp || 8, replacements: params.replacements !== false,
     houses: params.houses === false ? false : "combat",
   }))
-  // guild buffs (opt-in): raised for the whole team, paid with guild points -> no personal coins
+  // guild buffs (opt-in): raised for the whole team up to the guild's shrine levels, paid with guild tokens -> no coins
   if (params.guild) {
     for (const g of guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 5 })) {
       slots.push({
         key: g.key, member: -1, memberName: "全队（公会）", slotName: `公会·${g.name}`, states: g.states, guild: true,
-        trans: (a, b) => (b.level > a.level ? { cost: 0, how: `公会升到 ${b.level} 级（${g.points(a.level, b.level).toLocaleString()} 公会点数）` } : { cost: INF, how: "" }),
+        trans: (a, b) => (b.level > a.level ? { cost: 0, how: `公会加成升到 ${b.level} 级（${g.costText(b.level)}）` } : { cost: INF, how: "" }),
         value: () => 0,
       })
     }

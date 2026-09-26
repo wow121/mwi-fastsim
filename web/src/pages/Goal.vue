@@ -74,7 +74,7 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
         <el-checkbox v-model="opts.levels">包含等级提升</el-checkbox>
         <el-checkbox v-model="opts.consumables">药品优化</el-checkbox>
         <el-checkbox v-model="opts.charms">考虑换护符刷经验</el-checkbox>
-        <el-checkbox v-model="opts.guild">允许提升公会加成（公会点数，不花个人金币）</el-checkbox>
+        <el-checkbox v-model="opts.guild">允许提升公会加成（不超过公会神殿等级，花公会代币，不花金币）</el-checkbox>
         <span class="muted">成员</span>
         <el-checkbox-group v-model="optimize" size="small">
           <el-checkbox v-for="(m, i) in members" :key="m.id" :value="i">{{ m.name }}</el-checkbox>

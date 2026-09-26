@@ -262,6 +262,16 @@ function guildBuffs(maps, e) {
   return normalizeGuildBuffs(maps, out)
 }
 
+/** Levels of the guild's shrines per combat buff: a member's buff level can't go above them. */
+function guildBuffCaps(maps, e) {
+  if (!has(e, "guildBuildingLevelMap")) return undefined
+  const b = e.guildBuildingLevelMap && typeof e.guildBuildingLevelMap === "object" ? e.guildBuildingLevelMap : {}
+  return Object.fromEntries(combatGuildBuffs(maps).map(h => {
+    const f = b[maps.guildBuffDetailMap[h].shrineHrid]
+    return [h, Math.min(Math.max(0, Math.floor(num(f?.level ?? f, 0))), guildBuffMaxLevel(maps, h))]
+  }))
+}
+
 /** `qr`: normalize a config against a base config. */
 function normalizePlayer(m, e, base) {
   const maps = m.$e
@@ -292,6 +302,9 @@ function normalizePlayer(m, e, base) {
   a.triggerMap = Object.fromEntries(Object.entries(tm && typeof tm === "object" ? tm : {}).filter(([k]) => k).map(([k, v]) => [k, normalizeConditions(m, v)]))
   a.houseRooms = i.houseRooms && typeof i.houseRooms === "object" ? clone(i.houseRooms) : clone(n.houseRooms)
   a.guildBuffs = normalizeGuildBuffs(maps, i.guildBuffs, n.guildBuffs)
+  const caps = i.guildBuffCaps ?? n.guildBuffCaps
+  if (caps && typeof caps === "object") a.guildBuffCaps = normalizeGuildBuffs(maps, caps)
+  else delete a.guildBuffCaps
   a.achievements = has(i, "achievements") ? (i.achievements && typeof i.achievements === "object" ? clone(i.achievements) : {}) : clone(n.achievements ?? {})
   return a
 }
@@ -321,6 +334,8 @@ function fromCurrentCharacter(m, e, base) {
   if (a !== undefined) p.achievements = a
   const g = guildBuffs(maps, e)
   if (g !== undefined) p.guildBuffs = g
+  const gc = guildBuffCaps(maps, e)
+  if (gc !== undefined) p.guildBuffCaps = gc
   return normalizePlayer(m, p, base)
 }
 
@@ -418,6 +433,8 @@ function fromSharedProfile(m, payload, base) {
   if (a !== undefined) p.achievements = a
   const g = guildBuffs(maps, e)
   if (g !== undefined) p.guildBuffs = g
+  const gc = guildBuffCaps(maps, e)
+  if (gc !== undefined) p.guildBuffCaps = gc
   return normalizePlayer(m, p, base)
 }
 

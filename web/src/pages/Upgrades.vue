@@ -64,10 +64,11 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
     <el-card>
       <p class="muted" style="margin-top: 0">
         先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级、房子 +1～+3 级）逐个模拟，得到每项每天多赚多少；
+        队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 40 项）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字；
         再按你的现金和每天收入排出购买顺序：钱够了就买，目标是规划期末的总资产（现金 + 身上装备按买一价扣税能卖的钱）最高。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
         买入按市场最低卖价，卖出按最高买价并扣卖出税；过渡装备以后卖掉时的差价和税都算在损耗里。
-        房子按升级材料的市场价加金币算，升上去卖不回来。公会加成花的是公会点数、整个公会一起生效，只在单项表里列出供参考，不进购买计划。
+        房子按升级材料的市场价加金币算，升上去卖不回来。公会加成每人最多升到自己公会神殿的等级，花公会代币和公会币、不花金币，只在单项表里列出供参考，不进购买计划。
         获得装备的成本取最便宜的路线：直接买、贤者之镜合成（+N 加一件 +(N-1) 垫子加镜子 = +(N+1)，手上的装备可以当主件或垫子）、买普通版自己精炼。
       </p>
       <div class="row" style="margin-bottom: 8px"><TargetPicker v-model="target" /></div>
@@ -146,7 +147,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
           <el-checkbox-group v-model="kinds" size="small">
             <el-checkbox-button v-for="k in slotNames" :key="k" :value="k">{{ k }}</el-checkbox-button>
           </el-checkbox-group>
-          <span class="muted">从当前状态一步到位；N 天净收益 = 利润/天 × N − 损耗</span>
+          <span class="muted">从当前状态一步到位；N 天净收益 = 利润/天 × N − 损耗<template v-if="result.refineSeeds">；「复核」= 用 {{ result.refineHours }} 小时 × {{ result.refineSeeds }} 次重新模拟过（{{ result.refinedCount }} 项），「初筛」的数字误差较大，不进购买计划</template></span>
         </div>
       </template>
       <el-table :data="rows" size="small">
@@ -154,7 +155,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <el-table-column label="提升" min-width="230"><template #default="{ row }">{{ row.from }} → {{ row.label }}</template></el-table-column>
         <el-table-column prop="how" label="做法" min-width="170" />
         <el-table-column prop="cost" label="花费" width="110" align="right" sortable>
-          <template #default="{ row }">{{ row.guild ? `${row.guildPoints.toLocaleString()} 公会点` : money(row.cost) }}</template>
+          <template #default="{ row }">{{ row.guild ? `${row.guildTokens.toLocaleString()} 公会代币` : money(row.cost) }}</template>
         </el-table-column>
         <el-table-column prop="loss" label="损耗" width="100" align="right" sortable><template #default="{ row }">{{ row.guild ? "—" : money(row.loss) }}</template></el-table-column>
         <el-table-column prop="dProfitPerDay" label="全队利润/天" width="115" align="right" sortable>
@@ -165,6 +166,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         </el-table-column>
         <el-table-column prop="dOwnPerDay" label="自己/天" width="100" align="right" sortable><template #default="{ row }">{{ row.dOwnPerDay == null ? "" : sign(row.dOwnPerDay) }}</template></el-table-column>
         <el-table-column prop="dXpPerHour" label="经验/小时" width="100" align="right" sortable><template #default="{ row }">{{ row.dXpPerHour >= 0 ? "+" : "" }}{{ int(row.dXpPerHour) }}</template></el-table-column>
+        <el-table-column label="精度" width="60" align="center"><template #default="{ row }"><span :class="row.refined ? '' : 'muted'">{{ row.guild ? "" : row.refined ? "复核" : "初筛" }}</span></template></el-table-column>
         <el-table-column label="显著" width="60" align="center"><template #default="{ row }">{{ row.significance?.clearlyBetter ? "✓" : "" }}</template></el-table-column>
       </el-table>
     </el-card>
