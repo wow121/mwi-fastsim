@@ -266,6 +266,15 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       value: s => gp.value(s.h, s.n),
     })
   }
+  // Ability and house levels are part of the wealth, like gear: valued at what their books /
+  // materials would sell for (bid after tax, else 90% of the ask; coins at face value), so a book
+  // costs its spread and tax, not its whole price.
+  const resale = h => {
+    if (h === "/items/coin") return 1
+    const bid = book.price(h, "bid")
+    const ask = book.priceOrShop(h, "ask")
+    return (bid > 0 ? bid : ask > 0 ? ask * 0.9 : 0) * (1 - gp.tax)
+  }
   // abilities: +5 / +10 levels with books
   const xpTable = maps.levelExperienceTable || []
   const books = bookInfo(maps)
@@ -288,7 +297,7 @@ export function memberSlots(ctx, gp, members, idx, opts) {
     out.push({
       key: `${idx}:ability${i}`, member: idx, memberName: who, slot: `ability${i}`, slotName: `技能 ${i + 1}`, states,
       trans: (x, y) => (y.level > x.level ? { cost: count(x.level, y.level) * price, how: `${count(x.level, y.level)} 本书` } : { cost: INF, how: "" }),
-      value: () => 0,
+      value: st => count(from, st.level) * resale(b.item),
     })
   })
   // house rooms: +1..+maxHouseUp levels; cost = upgrade materials at the market ask + coins
@@ -317,6 +326,7 @@ export function memberSlots(ctx, gp, members, idx, opts) {
         for (let L = a + 1; L <= b; L++) c += levelCost(L)
         return c
       }
+      const levelValue = L => (costs[L] || []).reduce((sum, i) => sum + resale(i.itemHrid) * Number(i.count || 0), 0)
       const levels = []
       for (let l = from; l <= Math.min(max, from + up); l++) if (l === from || stepCost(from, l) <= opts.maxSpend) levels.push(l)
       if (levels.length < 2) continue
@@ -328,7 +338,11 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       out.push({
         key: `${idx}:house:${room.hrid}`, member: idx, memberName: who, slot: `house:${room.hrid}`, slotName: `房子·${name}`, states, house: true,
         trans: (x, y) => (y.level > x.level ? { cost: stepCost(x.level, y.level), how: `升级房子（${x.level} → ${y.level} 级）` } : { cost: INF, how: "" }),
-        value: () => 0,
+        value: st => {
+          let v = 0
+          for (let L = from + 1; L <= st.level; L++) v += levelValue(L)
+          return v
+        },
       })
     }
   }
@@ -536,16 +550,20 @@ export async function adviseUpgrades(ev, params, api) {
   const H = horizons.at(-1)
   const refineHours = Math.min(48, hours * 2)
   const refineSeeds = seedList(55555, Math.min(64, seeds.length * 4))
-  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 40)))
+  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 60)))
   const optimistic = (s, j) => (dp[s][j] + 3 * (info[s][j]?.sig?.se ?? 0) * 24) * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
-  const picks = jobs.filter(({ s, j }) => pay[s][0][j].cost < INF && optimistic(s, j) > 0)
-    .sort((a, b) => optimistic(b.s, b.j) - optimistic(a.s, a.j)).slice(0, refineTop)
+  const screenNet = (s, j) => dp[s][j] * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
+  const hopeful = jobs.filter(({ s, j }) => pay[s][0][j].cost < INF && optimistic(s, j) > 0)
+    .sort((a, b) => screenNet(b.s, b.j) - screenNet(a.s, a.j))
+  // the best state of every slot first, then the other states, in order of the screening estimate
+  const firsts = hopeful.filter((x, k) => hopeful.findIndex(y => y.s === x.s) === k)
+  const picks = [...firsts, ...hopeful.filter(x => !firsts.includes(x))].slice(0, refineTop)
   const refined = slots.map(sl => sl.states.map(() => false))
   const planDp = slots.map(sl => sl.states.map(() => 0))
   const planDpv = slots.map(sl => sl.states.map(() => members.map(() => 0)))
   let refBase = baseline
   if (picks.length) {
-    api.log(`复核 ${picks.length} 个可能划算的提升（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
+    api.log(`初筛有 ${hopeful.length} 个可能划算的提升，复核${hopeful.length > picks.length ? `最有希望的 ${picks.length} 个` : "全部"}（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
     refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
     done = 0
     const again = await pool(picks, 32, async ({ s, j, st }) => {
