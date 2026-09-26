@@ -42,16 +42,26 @@ const triggerTargets = computed(() => {
   const list = [...(m.abilities || []).map(a => a.abilityHrid), ...(m.food || []), ...(m.drinks || [])].filter(Boolean)
   return [...new Set(list)].map(h => ({ hrid: h, name: itemName(h) !== h ? itemName(h) : abilityName(h), model: trig(m, h) }))
 })
-const learned = computed(() => {
+// Teammates' profiles only show equipped abilities, so every ability stays selectable:
+// learned ones first (with their level), the rest at a level the user types in.
+const learnedMap = computed(() => {
   const m = member.value
   const map = { ...(m?.abilityLevelMap || {}) }
   for (const a of m?.abilities || []) if (a.abilityHrid) map[a.abilityHrid] ||= a.level
-  return o.value.abilities.filter(a => map[a.hrid]).map(a => ({ ...a, level: map[a.hrid] }))
+  return map
 })
+const learned = computed(() => o.value.abilities.filter(a => learnedMap.value[a.hrid]).map(a => ({ ...a, level: learnedMap.value[a.hrid] })))
+const abilityOptions = computed(() => [...learned.value, ...o.value.abilities.filter(a => !learnedMap.value[a.hrid]).map(a => ({ ...a, level: 0 }))])
 function setAbility(i, hrid) {
   const m = member.value
   const lv = m.abilityLevelMap?.[hrid] || m.abilities[i].level || 1
   m.abilities[i] = { abilityHrid: hrid || "", level: hrid ? lv : 1 }
+  if (hrid) m.abilityLevelMap = { ...(m.abilityLevelMap || {}), [hrid]: lv }
+  dirty.value = true
+}
+function setAbilityLevel(a) {
+  const m = member.value
+  if (a.abilityHrid) m.abilityLevelMap = { ...(m.abilityLevelMap || {}), [a.abilityHrid]: a.level }
   dirty.value = true
 }
 async function save() {
@@ -141,12 +151,12 @@ async function deleteLoadout(l) {
           <div v-for="(a, i) in member.abilities" :key="i" class="row" style="margin-bottom: 6px">
             <span style="width: 70px" class="muted">{{ i === 0 ? "特殊技能" : `技能 ${i}` }}</span>
             <el-select :model-value="a.abilityHrid" filterable clearable size="small" style="width: 220px" @update:model-value="v => setAbility(i, v)">
-              <el-option v-for="x in learned.filter(x => (i === 0) === x.isSpecial)" :key="x.hrid" :label="`${x.name} Lv.${x.level}`" :value="x.hrid" />
+              <el-option v-for="x in abilityOptions.filter(x => (i === 0) === x.isSpecial)" :key="x.hrid" :label="x.level ? `${x.name} Lv.${x.level}` : `${x.name}（未读到）`" :value="x.hrid" />
             </el-select>
-            <el-input-number v-model="a.level" :min="1" :max="200" size="small" style="width: 90px" @change="dirty = true" />
+            <el-input-number v-model="a.level" :min="1" :max="200" size="small" style="width: 90px" @change="setAbilityLevel(a)" />
             <span v-if="(member.levels?.intelligence ?? 1) < (o.slotRequirements[i + 1] ?? 0)" class="bad">智力不足，未解锁</span>
           </div>
-          <div class="muted">已学技能 {{ learned.length }} 个（来自插件数据）。</div>
+          <div class="muted">已学技能 {{ learned.length }} 个（来自插件数据）。队友只能读到正在装备的技能，其他技能标“未读到”，选上后填等级即可。</div>
         </el-tab-pane>
         <el-tab-pane label="食物/饮料">
           <div v-for="(kind, k) in [['food', '食物', o.food], ['drinks', '饮料', o.drinks]]" :key="k">

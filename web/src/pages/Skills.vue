@@ -20,6 +20,7 @@ onMounted(async () => {
 })
 const precision = ref("standard")
 const excluded = reactive({}) // member index -> Set of excluded hrids
+const added = reactive({}) // member index -> { hrid: level } for abilities not read from the game
 const result = ref(null)
 
 const PRESETS = {
@@ -35,12 +36,21 @@ function setOn(i, h, v) {
   excluded[i] ||= new Set()
   v ? excluded[i].delete(h) : excluded[i].add(h)
 }
+function isAdded(i, h) {
+  return added[i]?.[h] != null
+}
+function setAdded(i, h, v) {
+  added[i] ||= {}
+  if (v) added[i][h] = Math.max(1, ...Object.values(pools.value[i]?.pool || []).map(a => a.level || 0))
+  else delete added[i][h]
+}
 function params() {
   if (!members.value.length) return ElMessage.warning("先在“队伍”页勾选出战成员")
   return {
     members: members.value, target: target.value, extra: extra.value, objective: objective.value,
     optimize: optimize.value, rounds: rounds.value, allPresets: allPresets.value, stages: PRESETS[precision.value],
     exclude: Object.fromEntries(Object.entries(excluded).map(([k, s]) => [k, [...s]])),
+    add: Object.fromEntries(Object.entries(added).map(([k, o]) => [k, { ...o }])),
   }
 }
 const fmtObj = v => (result.value?.objective === "xp" ? `${int(v)} 经验/小时` : `${perDay(v)}/天`)
@@ -75,11 +85,14 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
           <span class="muted" v-if="pools[i]"> · {{ pools[i].className }} · {{ pools[i].slots }} 个技能格 · 特殊技能不变</span>
         </el-checkbox>
         <div class="row" style="margin-left: 24px" v-if="pools[i]">
-          <el-tooltip v-for="a in pools[i].pool" :key="a.hrid" :content="a.learned ? `触发预设：${a.presets.map(p => (p.checked ? '✓' : '') + p.label).join('；')}` : '还没学'" placement="top">
-            <el-check-tag :checked="a.learned && isOn(i, a.hrid)" :disabled="!a.learned" @change="v => a.learned && setOn(i, a.hrid, v)" size="small">
-              {{ a.name }} {{ a.learned ? a.level : "（未学）" }}
-            </el-check-tag>
-          </el-tooltip>
+          <template v-for="a in pools[i].pool" :key="a.hrid">
+            <el-tooltip :content="a.learned ? `触发预设：${a.presets.map(p => (p.checked ? '✓' : '') + p.label).join('；')}` : '没读到这个技能（队友只能读到正在装备的技能）。勾选后按填写的等级参与优化'" placement="top">
+              <el-check-tag :checked="a.learned ? isOn(i, a.hrid) : isAdded(i, a.hrid)" @change="v => (a.learned ? setOn(i, a.hrid, v) : setAdded(i, a.hrid, v))" size="small">
+                {{ a.name }} {{ a.learned ? a.level : isAdded(i, a.hrid) ? "" : "（未读到）" }}
+              </el-check-tag>
+            </el-tooltip>
+            <el-input-number v-if="!a.learned && isAdded(i, a.hrid)" v-model="added[i][a.hrid]" :min="1" :max="200" size="small" controls-position="right" style="width: 80px" />
+          </template>
           <span v-if="!pools[i].pool.length" class="bad">没识别出职业（看武器）</span>
         </div>
       </div>

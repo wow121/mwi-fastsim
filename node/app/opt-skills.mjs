@@ -1,5 +1,5 @@
 // Team skill + trigger optimization. Candidates follow the combat-sim site's skill optimizer:
-// class pool (learned abilities only), finisher locked last, cast order by class, trigger
+// class pool (learned abilities plus any the user added with a level), finisher locked last, cast order by class, trigger
 // presets per ability; thresholds of "search" presets tuned afterwards (coarse, then fine).
 // Coordinate descent over members; successive halving per member.
 import { halving, DEFAULT_STAGES } from "./search.mjs"
@@ -22,6 +22,7 @@ function applyGroup(members, idx, group, variant, levels) {
   const c = next[idx]
   c.abilities = [c.abilities?.[0] || { abilityHrid: "", level: 1 }]
   for (let i = 0; i < 4; i++) c.abilities.push(group[i] ? { abilityHrid: group[i], level: levels[group[i]] || 1 } : { abilityHrid: "", level: 1 })
+  c.abilityLevelMap = { ...(c.abilityLevelMap || {}), ...Object.fromEntries(group.map(h => [h, levels[h] || 1])) }
   c.triggerMap = { ...(c.triggerMap || {}) }
   const search = []
   for (const h of group) {
@@ -43,6 +44,7 @@ const names = (m, cfg) => (cfg.abilities || []).map(a => (a?.abilityHrid ? zh(m.
 
 /**
  * params: { members, target, extra, objective, optimize: [idx], exclude: {idx: [hrid]},
+ *           add: {idx: {hrid: level}} (abilities not read from the game, e.g. a teammate's unequipped ones),
  *           allPresets, rounds, stages }
  */
 export async function optimizeSkills(ev, params, api) {
@@ -69,8 +71,9 @@ export async function optimizeSkills(ev, params, api) {
         continue
       }
       const excluded = new Set(params.exclude?.[idx] || [])
-      const pool = mp.pool.filter(p => p.learned && !excluded.has(p.hrid)).map(p => p.hrid)
-      const levels = Object.fromEntries(mp.pool.map(p => [p.hrid, p.level]))
+      const added = Object.fromEntries(Object.entries(params.add?.[idx] || {}).filter(([h, l]) => mp.pool.some(p => p.hrid === h) && Number(l) > 0).map(([h, l]) => [h, Math.floor(Number(l))]))
+      const pool = mp.pool.filter(p => (p.learned || added[p.hrid]) && !excluded.has(p.hrid)).map(p => p.hrid)
+      const levels = { ...Object.fromEntries(mp.pool.map(p => [p.hrid, p.level])), ...added }
       const gs = groups(pool, mp.slots, mp.cls)
       const cands = [{ key: "当前", members: clone(members), incumbent: true, search: [] }]
       for (const g of gs)
