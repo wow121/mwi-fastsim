@@ -32,6 +32,8 @@ if (!plan.value.cash) plan.value.cash = {}
 if (!plan.value.other) plan.value.other = {}
 if (plan.value.houses == null) plan.value.houses = true
 if (plan.value.guild == null) plan.value.guild = true
+if (!plan.value.buyPrice) plan.value.buyPrice = "ask"
+if (!plan.value.sellPrice) plan.value.sellPrice = "bid"
 delete plan.value.budget
 delete plan.value.otherIncome
 watch(plan, v => save("fastsim-upgrade-plan", v), { deep: true })
@@ -45,7 +47,7 @@ function params() {
   const p = plan.value
   return {
     members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value, replacements: replacements.value, optimize: optimize.value,
-    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedUnrefine ? "unrefine" : "market", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd,
+    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedUnrefine ? "unrefine" : "market", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
   }
 }
 function onResult(r) {
@@ -67,7 +69,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 60 项）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字；
         再按你的现金和每天收入排出购买顺序：钱够了就买，目标是规划期末的总资产（现金 + 身上装备、技能等级、房子等级按买一价扣税估的价值）最高。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
-        买入按市场最低卖价，卖出按最高买价并扣卖出税；过渡装备以后卖掉时的差价和税都算在损耗里。
+        买入默认按市场最低卖价（直接买），卖出默认按最高买价（直接卖）并扣卖出税，可以改成挂单价（挂买单买、挂卖单卖，价格更好但要等成交）；过渡装备以后卖掉时的差价和税都算在损耗里。
         技能书和房子升级材料的钱不算白花：技能等级和房子等级跟装备一样计入总资产，按书和材料的买一价扣税（金币按原值）估值，所以损耗只是买卖差价和税。公会加成每人最多升到自己公会神殿的等级，花公会代币和公会币、不花金币，只在单项表里列出供参考，不进购买计划。
         获得装备的成本取最便宜的路线：直接买、贤者之镜合成（+N 加一件 +(N-1) 垫子加镜子 = +(N+1)，手上的装备可以当主件或垫子）、买普通版自己精炼。
       </p>
@@ -80,6 +82,16 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
       </div>
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">卖出税</span><el-input-number v-model="plan.tax" :min="0" :max="20" :step="0.5" size="small" /><span class="muted">%</span>
+        <span class="muted">买入按</span>
+        <el-radio-group v-model="plan.buyPrice" size="small">
+          <el-radio-button value="ask">卖一价（直接买）</el-radio-button>
+          <el-radio-button value="bid">买一价（挂买单）</el-radio-button>
+        </el-radio-group>
+        <span class="muted">卖出按</span>
+        <el-radio-group v-model="plan.sellPrice" size="small">
+          <el-radio-button value="bid">买一价（直接卖）</el-radio-button>
+          <el-radio-button value="ask">卖一价（挂卖单）</el-radio-button>
+        </el-radio-group>
       </div>
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">规划天数</span>

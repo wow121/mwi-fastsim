@@ -65,6 +65,62 @@ function bookInfo(maps) {
 }
 
 /**
+ * The planners' prices: buying at the lowest ask (default) or at the highest bid (a buy order
+ * that waits), selling at the highest bid (default) or at the lowest ask (a sell order). Wraps the
+ * price book so gear quotes, mirrors, refining materials, books and house materials all follow.
+ *
+ * Only prices inside the game's tradable band count: trades happen within ±10% of an item's
+ * market value (`p`), orders outside it just wait. A sell order above the band or a buy order below
+ * it is ignored; one below / above the band trades at its edge. Enhanced gear has no market value
+ * in the data: there both sides can only be in the band when the bid is at least 0.9 / 1.1 of the
+ * ask, so a lower bid (a +9 ring bid of 12.3M against a 2.9B ask) is treated as a waiting lowball.
+ * A buy order at the bid needs an ask, or a known market value. Combat profit is not affected.
+ */
+const BAND = 0.1
+const num = v => (Number.isFinite(Number(v)) ? Number(v) : -1)
+function inBand(ask, bid, p) {
+  if (p > 0) {
+    const lo = p * (1 - BAND)
+    const hi = p * (1 + BAND)
+    if (ask > hi) ask = -1
+    else if (ask > 0 && ask < lo) ask = lo
+    if (bid > 0 && bid < lo) bid = -1
+    else if (bid > hi) bid = hi
+  } else if (ask > 0 && bid > 0 && bid < (ask * (1 - BAND)) / (1 + BAND)) bid = -1
+  return { ask, bid, p }
+}
+export function pricedBook(book, opts = {}) {
+  const buyAtBid = opts.buyPrice === "bid"
+  const sellAtAsk = opts.sellPrice === "ask"
+  const buy = q => (buyAtBid && q.bid > 0 && (q.ask > 0 || q.p > 0) ? q.bid : q.ask)
+  const sell = q => (sellAtAsk && q.ask > 0 ? q.ask : q.bid)
+  const price = (h, mode = "bid") => {
+    const r = book.market?.[h]?.["0"]
+    if ((mode !== "ask" && mode !== "bid") || !r) return book.price(h, mode)
+    const q = inBand(num(r.a), num(r.b), num(r.p))
+    const [first, other] = mode === "ask" ? [buy(q), q.bid] : [sell(q), q.ask]
+    return first > 0 ? first : other > 0 ? other : book.price(h, "vendor")
+  }
+  return new Proxy(book, {
+    get(t, k) {
+      if (k === "price") return price
+      if (k === "priceOrShop") return (h, mode) => {
+        const v = price(h, mode)
+        return v > 0 ? v : t.priceOrShop(h, mode)
+      }
+      if (k === "enhancedQuote") return (h, n) => {
+        const q = t.enhancedQuote(h, n)
+        if (!q) return q
+        const b = inBand(q.ask, q.bid, num(t.market?.[h]?.[String(n)]?.p))
+        return { ask: buy(b), bid: sell(b) }
+      }
+      const v = t[k]
+      return typeof v === "function" ? v.bind(t) : v
+    },
+  })
+}
+
+/**
  * Gear prices: acquisition cost of (item, level) — market ask, mirror synthesis (+N and a +(N-1)
  * pad and a Philosopher's Mirror give +(N+1); the pad of a refined item may be the normal
  * version) or buying the normal version and refining it — and the resale value after tax.
@@ -216,7 +272,8 @@ export class GearPrices {
 
 /** Slots of a member with their candidate states. state: { label, apply(cfg), h, n } / { level }. */
 export function memberSlots(ctx, gp, members, idx, opts) {
-  const { m, book } = ctx
+  const { m } = ctx
+  const book = gp.book // the planner's buy / sell prices
   const maps = m.$e
   const cfg = members[idx]
   const nm = h => zh(maps, h)
@@ -273,7 +330,9 @@ export function memberSlots(ctx, gp, members, idx, opts) {
     if (h === "/items/coin") return 1
     const bid = book.price(h, "bid")
     const ask = book.priceOrShop(h, "ask")
-    return (bid > 0 ? bid : ask > 0 ? ask * 0.9 : 0) * (1 - gp.tax)
+    // never above the buying price (selling at the ask, buying at the bid is trading, not an upgrade)
+    const sell = bid > 0 ? bid : ask > 0 ? ask * 0.9 : 0
+    return (ask > 0 ? Math.min(sell, ask) : sell) * (1 - gp.tax)
   }
   // abilities: +5 / +10 levels with books
   const xpTable = maps.levelExperienceTable || []
@@ -508,7 +567,7 @@ export async function adviseUpgrades(ev, params, api) {
   const horizons = (params.horizons?.length ? params.horizons : [30, 60]).map(Number).filter(d => d > 0).sort((a, b) => a - b)
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
   const maps = ev.ctx.m.$e
-  const gp = new GearPrices(maps, ev.ctx.book, tax, { refinedResale: params.refinedResale })
+  const gp = new GearPrices(maps, pricedBook(ev.ctx.book, params), tax, { refinedResale: params.refinedResale })
 
   const baseline = await ev.evaluate(members, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
   const P0 = baseline.mean.profitPerHour * 24

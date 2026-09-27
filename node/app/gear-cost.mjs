@@ -3,7 +3,7 @@
 // item may be the normal version), buy the normal version and refine it, or buy the refined version
 // and un-refine it (half of the refining materials come back) — optionally starting from a piece
 // the player already has (sell it, mirror it up as the main item, use it as a pad, un-refine it).
-import { GearPrices } from "./opt-upgrades.mjs"
+import { GearPrices, pricedBook } from "./opt-upgrades.mjs"
 import { zh } from "./i18n.mjs"
 
 const INF = Number.POSITIVE_INFINITY
@@ -53,7 +53,8 @@ function mirrorUp(gp, h, from, to) {
  * params: { hrid, level, tax, held: { hrid, level } | null }
  * -> { target, mirrorPrice, refine, market, options: [{ key, label, cost, lines, shopping }], best, table }
  */
-export function gearCost(game, book, params) {
+export function gearCost(game, rawBook, params) {
+  const book = pricedBook(rawBook, params) // prices inside the tradable band only
   const maps = game.$e
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
   const gp = new GearPrices(maps, book, tax, { refinedResale: params.refinedResale || "market" })

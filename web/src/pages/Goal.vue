@@ -26,8 +26,8 @@ watch(goal, v => save("fastsim-goal-target", v), { deep: true })
 const extra = ref(defaultExtra())
 // cash / other income / tax are shared with the upgrade planner page
 const plan = ref(load("fastsim-upgrade-plan", {}))
-for (const [k, d] of [["cash", {}], ["other", {}], ["tax", 5]]) if (plan.value[k] == null) plan.value[k] = d
-watch(plan, v => save("fastsim-upgrade-plan", { ...load("fastsim-upgrade-plan", {}), cash: v.cash, other: v.other, tax: v.tax }), { deep: true })
+for (const [k, d] of [["cash", {}], ["other", {}], ["tax", 5], ["buyPrice", "ask"], ["sellPrice", "bid"]]) if (plan.value[k] == null) plan.value[k] = d
+watch(plan, v => save("fastsim-upgrade-plan", { ...load("fastsim-upgrade-plan", {}), cash: v.cash, other: v.other, tax: v.tax, buyPrice: v.buyPrice, sellPrice: v.sellPrice }), { deep: true })
 const opts = ref(load("fastsim-goal-opts", { maxDeaths: 0.01, maxLevelUp: 8, replacements: true, levels: true, consumables: true, guild: false, charms: true }))
 watch(opts, v => save("fastsim-goal-opts", v), { deep: true })
 const optimize = ref(members.value.map((_, i) => i))
@@ -39,7 +39,7 @@ function params() {
   return {
     members: members.value, goal: goal.value, current: current.value, extra: extra.value, optimize: optimize.value,
     budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6),
-    tax: p.tax / 100, maxDeaths: opts.value.maxDeaths, maxLevelUp: opts.value.maxLevelUp, replacements: opts.value.replacements, levels: opts.value.levels !== false, consumables: opts.value.consumables !== false, guild: !!opts.value.guild, charms: opts.value.charms !== false,
+    tax: p.tax / 100, buyPrice: p.buyPrice, sellPrice: p.sellPrice, maxDeaths: opts.value.maxDeaths, maxLevelUp: opts.value.maxLevelUp, replacements: opts.value.replacements, levels: opts.value.levels !== false, consumables: opts.value.consumables !== false, guild: !!opts.value.guild, charms: opts.value.charms !== false,
   }
 }
 const fmtDays = d => (d == null || !Number.isFinite(d) ? "—" : d < 0.05 ? "0" : d.toFixed(1))
@@ -70,6 +70,16 @@ const deaths = d => `${d.toFixed(d < 0.1 ? 3 : 2)}/小时`
         <span class="muted">允许死亡</span><el-input-number v-model="opts.maxDeaths" :min="0" :max="5" :step="0.01" :precision="2" size="small" /><span class="muted">次/小时（0.01 ≈ 100 小时死一次；0 = 24 小时 × 12 次复核里一次都不死）</span>
         <span class="muted">强化最多比现在高</span><el-input-number v-model="opts.maxLevelUp" :min="1" :max="12" size="small" /><span class="muted">级</span>
         <span class="muted">卖出税</span><el-input-number v-model="plan.tax" :min="0" :max="20" :step="0.5" size="small" /><span class="muted">%</span>
+        <span class="muted">买入按</span>
+        <el-radio-group v-model="plan.buyPrice" size="small">
+          <el-radio-button value="ask">卖一价（直接买）</el-radio-button>
+          <el-radio-button value="bid">买一价（挂买单）</el-radio-button>
+        </el-radio-group>
+        <span class="muted">卖出按</span>
+        <el-radio-group v-model="plan.sellPrice" size="small">
+          <el-radio-button value="bid">买一价（直接卖）</el-radio-button>
+          <el-radio-button value="ask">卖一价（挂卖单）</el-radio-button>
+        </el-radio-group>
         <el-checkbox v-model="opts.replacements">包含换装</el-checkbox>
         <el-checkbox v-model="opts.levels">包含等级提升</el-checkbox>
         <el-checkbox v-model="opts.consumables">药品优化</el-checkbox>
