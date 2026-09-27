@@ -1,34 +1,24 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue"
-import { ElMessage } from "element-plus"
-import { abilityName, call, defaultExtra, defaultTarget, int, itemName, money, pct, selectedMembers, store, triggerText } from "../api.js"
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
+import { ElMessage, ElMessageBox } from "element-plus"
+import { abilityName, call, clone, defaultExtra, defaultTarget, int, itemName, money, pct, store, triggerText } from "../api.js"
 import JobRunner from "../components/JobRunner.vue"
 import TargetPicker from "../components/TargetPicker.vue"
 import ExtraBuffs from "../components/ExtraBuffs.vue"
-import ApplyResult from "../components/ApplyResult.vue"
 
 // Ironcow (铁牛) mode: no market. Drops are worth the shop sell price, food / drinks / keys cost
 // the time to make them by hand, and every rate is per "cycle hour" (combat + that hand work).
+// The characters come from the separate ironcow userscript and live in their own team.
 const KEY = "fastsim-ironcow"
+const SCRIPT_URL = "https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim-ironcow.user.js"
 const SKILLS = [["milking", "挤奶"], ["foraging", "采摘"], ["woodcutting", "伐木"], ["cheesesmithing", "奶酪锻造"], ["crafting", "制作"], ["tailoring", "缝纫"], ["cooking", "烹饪"], ["brewing", "冲泡"]]
+const GATHERING = new Set(["milking", "foraging", "woodcutting"])
 function load() {
   let s = null
   try {
     s = JSON.parse(localStorage.getItem(KEY) || "null")
   } catch {}
-  const per = (o, d) => Object.fromEntries(SKILLS.map(([k]) => [k, Number(o?.[k] ?? d)]))
-  return {
-    targets: Array.isArray(s?.targets) ? s.targets : [],
-    objective: s?.objective || "items",
-    craft: {
-      levels: per(s?.craft?.levels, 1),
-      speed: per(s?.craft?.speed, 0),
-      efficiency: per(s?.craft?.efficiency, 0),
-      artisan: !!s?.craft?.artisan,
-      gourmet: !!s?.craft?.gourmet,
-      gatherQty: Number(s?.craft?.gatherQty ?? 0),
-    },
-  }
+  return { targets: Array.isArray(s?.targets) ? s.targets : [], objective: s?.objective || "items" }
 }
 const cfg = reactive(load())
 watch(cfg, v => {
@@ -42,12 +32,78 @@ const targetHrids = computed({
   set: list => (cfg.targets = list.map(h => cfg.targets.find(t => t.hrid === h) || { hrid: h, weight: 1 })),
 })
 const itemOptions = computed(() => Object.entries(store.options?.names.items || {}).map(([hrid, name]) => ({ hrid, name })))
-const ironcow = () => JSON.parse(JSON.stringify({ ...cfg, objective: cfg.objective === "items" && !cfg.targets.length ? "coins" : cfg.objective }))
-const skillRows = computed(() => SKILLS.map(([key, name]) => ({ key, name })))
+
+// ---- the ironcow team
+const team = ref({ members: [], selected: [] })
+async function loadTeam() {
+  const t = await call("GET", "/api/ironcow/team")
+  for (const m of t.members || []) life(m) // fill defaults before rendering (no writes during render)
+  team.value = t
+}
+let saveTimer = null
+function saveTeam(now = false) {
+  clearTimeout(saveTimer)
+  const put = () => call("PUT", "/api/ironcow/team", { members: team.value.members, selected: team.value.selected })
+  if (now) return put()
+  saveTimer = setTimeout(put, 400)
+}
+onMounted(() => window.addEventListener("fastsim-ironcow-updated", loadTeam))
+onUnmounted(() => window.removeEventListener("fastsim-ironcow-updated", loadTeam))
+const members = computed(() => team.value.selected.map(id => team.value.members.find(m => String(m.id) === String(id))).filter(Boolean))
+function toggle(m, on) {
+  const id = String(m.id)
+  const sel = team.value.selected.filter(x => x !== id)
+  if (on) {
+    if (sel.length >= 5) return ElMessage.warning("最多 5 人出战")
+    sel.push(id)
+  }
+  team.value.selected = sel
+  saveTeam(true)
+}
+async function remove(m) {
+  await ElMessageBox.confirm(`从铁牛队伍删除 ${m.name}？（在游戏里重新登录这个角色会再导入）`, "删除", { type: "warning" })
+  team.value.members = team.value.members.filter(x => x !== m)
+  team.value.selected = team.value.selected.filter(x => x !== String(m.id))
+  saveTeam(true)
+}
+const noMembers = () => (members.value.length ? false : (ElMessage.warning("铁牛队伍里还没有勾选出战的角色"), true))
+const modeText = m => (!m.gameMode ? "模式未知" : /ironcow/i.test(m.gameMode) ? "铁牛" : m.gameMode)
+
+// per-member hand-crafting settings (imported, editable)
+const LIFE_KEYS = ["levels", "levelBonus", "speed", "efficiency", "artisan", "output"]
+function life(m) {
+  m.life ||= {}
+  for (const k of LIFE_KEYS) {
+    m.life[k] ||= {}
+    for (const [s] of SKILLS) if (m.life[k][s] == null) m.life[k][s] = k === "levels" ? 1 : 0
+  }
+  return m.life
+}
+const lifeTab = ref("")
+watch(members, list => {
+  if (!list.some(m => String(m.id) === lifeTab.value)) lifeTab.value = list[0] ? String(list[0].id) : ""
+}, { immediate: true })
+const skillRows = SKILLS.map(([key, name]) => ({ key, name, gathering: GATHERING.has(key) }))
+const lifeSource = m => {
+  const src = m.life?.source
+  if (!src) return ""
+  const parts = []
+  if (src.items?.length) parts.push(`工具/装备 ${src.items.map(i => `${itemName(i.itemHrid)}${i.enhancementLevel ? ` +${i.enhancementLevel}` : ""}`).join("、")}`)
+  const teas = Object.entries(src.teas || {}).filter(([, l]) => l.length)
+  if (teas.length) parts.push(`茶 ${teas.map(([s, l]) => `${SKILLS.find(x => x[0] === s)?.[1]}：${l.map(itemName).join("、")}`).join("；")}`)
+  if (src.drinkConcentration) parts.push(`饮料浓度 +${(src.drinkConcentration * 100).toFixed(1)}%`)
+  return parts.join(" · ")
+}
+
+const ironcow = () => JSON.parse(JSON.stringify({
+  targets: cfg.targets,
+  objective: cfg.objective === "items" && !cfg.targets.length ? "coins" : cfg.objective,
+  craft: members.value.map(m => life(m)),
+}))
+/** Engine members: the configs without the ironcow-only fields. */
+const simMembers = () => members.value.map(({ life: _l, gameMode: _g, syncedAt: _s, ...rest }) => clone(rest))
 
 const tab = ref("zones")
-const members = computed(() => selectedMembers())
-const noMembers = () => (members.value.length ? false : (ElMessage.warning("先在“队伍”页勾选出战成员"), true))
 
 // ---- formatting by objective
 const objName = { items: "目标物品", coins: "商店金币", xp: "经验" }
@@ -77,7 +133,7 @@ function zoneParams() {
     for (const t of tiers.value) if (t <= (z?.maxDifficulty ?? 0)) targets.push({ kind: "zone", zoneHrid: h, difficultyTier: t })
   }
   if (!targets.length) return ElMessage.warning("没有可模拟的目标")
-  return { members: members.value, targets, hours: hours.value, seeds: seeds.value, extra: extra.value, ironcow: ironcow() }
+  return { members: simMembers(), targets, hours: hours.value, seeds: seeds.value, extra: extra.value, ironcow: ironcow() }
 }
 const zoneRows = computed(() => (zoneResult.value?.rows || []).filter(r => r.metrics).map(r => ({ ...r, ...r.metrics })))
 const zoneTargets = computed(() => [...new Set(zoneRows.value.flatMap(r => Object.keys(r.targetsPerHour || {})))])
@@ -85,15 +141,26 @@ const zoneObj = computed(() => zoneResult.value?.objective || "coins")
 
 // ---- skills / food
 const target = ref(defaultTarget())
-const optimize = ref(members.value.map((_, i) => i))
+const optimize = ref([])
+watch(members, list => (optimize.value = list.map((_, i) => i)), { immediate: true })
 const rounds = ref(2)
 const swapItems = ref(true)
 const craftableOnly = ref(true)
 const skillResult = ref(null)
 const foodResult = ref(null)
-const skillParams = () => (noMembers() ? undefined : { members: members.value, target: target.value, extra: extra.value, optimize: optimize.value, rounds: rounds.value, ironcow: ironcow() })
-const foodParams = () => (noMembers() ? undefined : { members: members.value, target: target.value, extra: extra.value, optimize: optimize.value, rounds: rounds.value, swapItems: swapItems.value, craftableOnly: craftableOnly.value, ironcow: ironcow() })
+const skillParams = () => (noMembers() ? undefined : { members: simMembers(), target: target.value, extra: extra.value, optimize: optimize.value, rounds: rounds.value, ironcow: ironcow() })
+const foodParams = () => (noMembers() ? undefined : { members: simMembers(), target: target.value, extra: extra.value, optimize: optimize.value, rounds: rounds.value, swapItems: swapItems.value, craftableOnly: craftableOnly.value, ironcow: ironcow() })
 const valueKey = obj => (obj === "items" ? "itemsPerHour" : obj === "xp" ? "xpPerHour" : "coinsPerHour")
+/** Writes optimized configs back into the ironcow team (keeps each member's life settings). */
+async function apply(list) {
+  await ElMessageBox.confirm("用优化结果覆盖铁牛队伍中这些角色的配置？", "应用到铁牛队伍", { type: "warning" })
+  for (const m of list) {
+    const i = team.value.members.findIndex(x => String(x.id) === String(m.id))
+    if (i >= 0) team.value.members[i] = { ...team.value.members[i], ...clone(m) }
+  }
+  await saveTeam(true)
+  ElMessage.success("已应用并保存")
+}
 const foodSetup = computed(() => (foodResult.value?.members || []).map((m, i) => {
   const before = members.value.find(x => String(x.id) === String(m.id)) || members.value[i]
   const rows = []
@@ -107,15 +174,20 @@ const foodSetup = computed(() => (foodResult.value?.members || []).map((m, i) =>
   return { name: m.name, rows }
 }))
 
-// ---- craft table
+// ---- craft table (one member's life skills)
 const craft = ref(null)
 const craftKind = ref("all")
+const craftMember = ref("")
 async function loadCraft() {
-  craft.value = await call("POST", "/api/ironcow/craft", { ironcow: ironcow() })
+  const m = team.value.members.find(x => String(x.id) === craftMember.value) || members.value[0]
+  craft.value = await call("POST", "/api/ironcow/craft", { ironcow: { craft: m ? life(m) : {} } })
 }
-onMounted(loadCraft)
+onMounted(async () => {
+  await loadTeam()
+  loadCraft()
+})
 let craftTimer = null
-watch(() => cfg.craft, () => {
+watch([() => team.value.members.map(m => m.life), craftMember], () => {
   clearTimeout(craftTimer)
   craftTimer = setTimeout(loadCraft, 300)
 }, { deep: true })
@@ -153,20 +225,37 @@ const treeRows = (t, path = "") => (t.children || []).map((c, i) => ({ ...c, id:
         </el-radio-group>
         <span v-if="cfg.objective === 'items' && !cfg.targets.length" class="muted">（还没选目标物品，按金币算）</span>
       </div>
-      <el-collapse>
-        <el-collapse-item title="生活技能与茶（决定手搓速度）">
-          <el-table :data="skillRows" size="small" style="max-width: 560px">
-            <el-table-column prop="name" label="技能" width="100" />
-            <el-table-column label="等级"><template #default="{ row }"><el-input-number v-model="cfg.craft.levels[row.key]" :min="1" :max="200" size="small" style="width: 110px" /></template></el-table-column>
-            <el-table-column label="速度 %"><template #default="{ row }"><el-input-number v-model="cfg.craft.speed[row.key]" :min="0" :max="500" size="small" style="width: 110px" /></template></el-table-column>
-            <el-table-column label="额外效率 %"><template #default="{ row }"><el-input-number v-model="cfg.craft.efficiency[row.key]" :min="0" :max="500" size="small" style="width: 110px" /></template></el-table-column>
-          </el-table>
-          <div class="row" style="margin-top: 8px">
-            <el-checkbox v-model="cfg.craft.artisan">工匠茶（原料 −10%）</el-checkbox>
-            <el-checkbox v-model="cfg.craft.gourmet">美食茶（烹饪/冲泡产出 +12%）</el-checkbox>
-            <span class="muted">采集数量 +</span><el-input-number v-model="cfg.craft.gatherQty" :min="0" :max="100" size="small" style="width: 100px" /><span class="muted">%</span>
-          </div>
-          <p class="muted">等级高于配方要求时每级 +1% 效率（自动算）；速度来自工具，额外效率来自茶、房屋等，自己填。泡茶本身的时间暂不计入。</p>
+      <div class="row" style="margin-top: 8px"><b>铁牛队伍</b>
+        <span class="muted">角色由「铁牛导入」油猴脚本在游戏里读取，和普通队伍分开保存；勾选出战（最多 5 人）。</span>
+        <el-link type="primary" :href="SCRIPT_URL" target="_blank">安装铁牛导入脚本</el-link>
+      </div>
+      <el-alert v-if="!team.members.length" type="info" :closable="false" style="margin-top: 8px"
+        title="还没有铁牛角色：装好「铁牛导入」脚本，在游戏里登录铁牛角色，左下角出现紫色提示就说明读到了，再回到本页（网页版要刷新一下）。多个铁牛号就每个号各登录一次。" />
+      <el-table v-else :data="team.members" size="small" style="margin-top: 8px">
+        <el-table-column label="出战" width="60"><template #default="{ row }"><el-checkbox :model-value="team.selected.includes(String(row.id))" @change="v => toggle(row, v)" /></template></el-table-column>
+        <el-table-column prop="name" label="角色" width="140" />
+        <el-table-column label="模式" width="90"><template #default="{ row }"><el-tag size="small" :type="/ironcow/i.test(row.gameMode || '') ? 'success' : 'info'">{{ modeText(row) }}</el-tag></template></el-table-column>
+        <el-table-column label="食物 / 饮料"><template #default="{ row }">{{ [...(row.food || []), ...(row.drinks || [])].filter(Boolean).map(itemName).join("、") }}</template></el-table-column>
+        <el-table-column label="导入时间" width="170"><template #default="{ row }">{{ row.syncedAt ? new Date(row.syncedAt).toLocaleString() : "" }}</template></el-table-column>
+        <el-table-column width="70"><template #default="{ row }"><el-button link type="danger" size="small" @click="remove(row)">删除</el-button></template></el-table-column>
+      </el-table>
+      <el-collapse v-if="members.length" style="margin-top: 8px">
+        <el-collapse-item title="生活技能与加成（决定手搓速度；导入时按工具、装备、房子、茶、社区加成自动算好，可以改）">
+          <el-tabs v-model="lifeTab">
+            <el-tab-pane v-for="m in members" :key="m.id" :name="String(m.id)" :label="m.name">
+              <div v-if="lifeSource(m)" class="muted" style="margin-bottom: 6px">{{ lifeSource(m) }}</div>
+              <el-table :data="skillRows" size="small" style="max-width: 860px">
+                <el-table-column prop="name" label="技能" width="90" />
+                <el-table-column label="等级"><template #default="{ row }"><el-input-number v-model="life(m).levels[row.key]" :min="1" :max="200" size="small" style="width: 100px" @change="saveTeam()" /></template></el-table-column>
+                <el-table-column label="茶加等级"><template #default="{ row }"><el-input-number v-model="life(m).levelBonus[row.key]" :min="-20" :max="50" size="small" style="width: 100px" @change="saveTeam()" /></template></el-table-column>
+                <el-table-column label="速度 %"><template #default="{ row }"><el-input-number v-model="life(m).speed[row.key]" :min="0" :max="500" :precision="1" size="small" style="width: 100px" @change="saveTeam()" /></template></el-table-column>
+                <el-table-column label="效率 %"><template #default="{ row }"><el-input-number v-model="life(m).efficiency[row.key]" :min="0" :max="500" :precision="1" size="small" style="width: 100px" @change="saveTeam()" /></template></el-table-column>
+                <el-table-column label="工匠 %"><template #default="{ row }"><el-input-number v-if="!row.gathering" v-model="life(m).artisan[row.key]" :min="0" :max="50" :precision="1" size="small" style="width: 100px" @change="saveTeam()" /></template></el-table-column>
+                <el-table-column label="产量 %"><template #default="{ row }"><el-input-number v-model="life(m).output[row.key]" :min="0" :max="200" :precision="1" size="small" style="width: 100px" @change="saveTeam()" /></template></el-table-column>
+              </el-table>
+            </el-tab-pane>
+          </el-tabs>
+          <p class="muted">等级高于配方要求时每级 +1% 效率（自动算，不用填进效率里）。茶加等级已包含工匠茶的 −5；效率含房子、茶、装备、社区加成；工匠 = 原料减少；产量 = 美食茶（烹饪/冲泡）或采集数量。每人按自己的设置算自己吃的东西。泡茶本身的时间暂不计入。</p>
         </el-collapse-item>
       </el-collapse>
       <div class="row" style="margin-top: 8px"><ExtraBuffs v-model="extra" /></div>
@@ -256,7 +345,7 @@ const treeRows = (t, path = "") => (t.children || []).map((c, i) => ({ ...c, id:
                 {{ fmtObj(skillResult.final[valueKey(skillResult.ironcowObjective)], skillResult.ironcowObjective) }}
               </span>
               <span style="flex: 1" />
-              <ApplyResult v-if="!skillResult.unchanged" :members="skillResult.members" />
+              <el-button v-if="!skillResult.unchanged" type="success" size="small" @click="apply(skillResult.members)">应用到铁牛队伍</el-button>
             </div>
           </template>
           <div class="grid">
@@ -301,7 +390,7 @@ const treeRows = (t, path = "") => (t.children || []).map((c, i) => ({ ...c, id:
                 · 战斗时间占比 {{ pct(foodResult.baseline.combatShare) }} → {{ pct(foodResult.final.combatShare) }}
               </span>
               <span style="flex: 1" />
-              <ApplyResult v-if="!foodResult.unchanged" :members="foodResult.members" />
+              <el-button v-if="!foodResult.unchanged" type="success" size="small" @click="apply(foodResult.members)">应用到铁牛队伍</el-button>
             </div>
           </template>
           <div class="grid">
@@ -330,7 +419,10 @@ const treeRows = (t, path = "") => (t.children || []).map((c, i) => ({ ...c, id:
               <el-radio-button value="food">食物</el-radio-button>
               <el-radio-button value="drink">饮料</el-radio-button>
             </el-radio-group>
-            <span class="muted">从采集原料开始，做一个要多少时间（按上面的生活技能设置）。展开看配方树。</span>
+            <el-select v-model="craftMember" size="small" style="width: 160px" placeholder="按谁的生活技能">
+              <el-option v-for="m in team.members" :key="m.id" :label="m.name" :value="String(m.id)" />
+            </el-select>
+            <span class="muted">从采集原料开始，做一个要多少时间（按所选角色的生活技能设置）。展开看配方树。</span>
           </div>
           <el-table :data="craftRows" size="small" row-key="hrid" :default-sort="{ prop: 'seconds', order: 'ascending' }">
             <el-table-column type="expand">

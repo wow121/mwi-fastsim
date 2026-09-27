@@ -20,14 +20,15 @@ OBJECTIVE_FORMATS["ironcow-items"] = v => `${(v * 24).toFixed(2)} 个目标物�
 OBJECTIVE_FORMATS["ironcow-coins"] = v => `${(v * 24 / 1e6).toFixed(2)}M 商店金币/天（含手搓时间）`
 OBJECTIVE_FORMATS["ironcow-xp"] = v => `${Math.round(v).toLocaleString()} 经验/小时（含手搓时间）`
 
-/** cfg: { targets: [{ hrid, weight }], objective: "items" | "coins" | "xp", craft: craft.mjs cfg } */
+/** cfg: { targets: [{ hrid, weight }], objective: "items" | "coins" | "xp", craft: craft.mjs cfg, or one per member } */
 export function normalizeIronCfg(cfg = {}) {
   const targets = (Array.isArray(cfg.targets) ? cfg.targets : [])
     .filter(t => t?.hrid)
     .slice(0, 5)
     .map(t => ({ hrid: String(t.hrid), weight: Math.max(0, num(t.weight, 1)) }))
   const objective = IRONCOW_OBJECTIVES[cfg.objective] ? cfg.objective : targets.length ? "items" : "coins"
-  return { targets, objective: objective === "items" && !targets.length ? "coins" : objective, craft: cfg.craft || {} }
+  const crafts = Array.isArray(cfg.craft) ? (cfg.craft.length ? cfg.craft : [{}]) : [cfg.craft || {}]
+  return { targets, objective: objective === "items" && !targets.length ? "coins" : objective, crafts }
 }
 
 function add(map, k, v) {
@@ -40,7 +41,7 @@ export class IronMetrics {
     this.maps = maps
     this.book = book
     this.cfg = normalizeIronCfg(cfg)
-    this.craft = new CraftTimes(maps, this.cfg.craft)
+    this.crafts = this.cfg.crafts.map(c => new CraftTimes(maps, c))
     this.weights = new Map(this.cfg.targets.map(t => [t.hrid, t.weight]))
     this.openMemo = new Map()
   }
@@ -76,8 +77,14 @@ export class IronMetrics {
   }
 
   /** One player over the whole run (totals, not per hour). */
+  /** Hand-crafting times of member `i` (0-based): its own life skills, else the first member's. */
+  craftOf(i) {
+    return this.crafts[i] || this.crafts[0]
+  }
+
   player(r, playerId) {
     const pid = activePlayer(r, playerId)
+    const craft = this.craftOf(Number(pid.replace("player", "")) - 1)
     const { drops, rewards } = playerDrops(this.maps, r, pid)
     let coins = 0
     const targets = new Map()
@@ -92,7 +99,7 @@ export class IronMetrics {
     const missing = new Set()
     const locked = new Set()
     for (const [h, n] of used) {
-      const c = this.craft.of(h)
+      const c = craft.of(h)
       craftSec += c.seconds * n
       for (const x of c.missing) missing.add(x)
       for (const x of c.locked) locked.add(x)
@@ -100,7 +107,7 @@ export class IronMetrics {
     let score = 0
     for (const [h, n] of targets) score += n * (this.weights.get(h) || 0)
     const xp = Object.values(r?.experienceGained?.[pid] || {}).reduce((a, b) => a + num(b), 0)
-    return { coins, targets, score, used, craftHours: craftSec / 3600, missing, locked, xp, deaths: num(r?.deaths?.[pid]) }
+    return { coins, targets, score, used, craft, craftHours: craftSec / 3600, missing, locked, xp, deaths: num(r?.deaths?.[pid]) }
   }
 
   /** Team metrics of one run, per cycle hour (combat + hand work) unless noted. */
@@ -129,7 +136,7 @@ export class IronMetrics {
         craftPerCombatHour: combat > 0 ? p.craftHours / combat : 0,
         deathsPerHour: combat > 0 ? p.deaths / combat : 0,
         usedPerCombatHour: Object.fromEntries([...p.used].map(([h, a]) => [h, combat > 0 ? a / combat : 0])),
-        craftSecondsPerUnit: Object.fromEntries([...p.used.keys()].map(h => [h, this.craft.seconds(h)])),
+        craftSecondsPerUnit: Object.fromEntries([...p.used.keys()].map(h => [h, p.craft.seconds(h)])),
         missing: [...p.missing],
         locked: [...p.locked],
         outOfManaTimeRatio: outOfManaRatio(r, `player${i + 1}`),

@@ -9,7 +9,7 @@ import { teamDTO } from "@app/model.mjs"
 import { options } from "@app/options.mjs"
 import { decodeGameData } from "@app/gamedata.mjs"
 import { hash53 } from "@app/hash.mjs"
-import { gearCost, ironcowRoutes, jobRoutes, simulate, skillPools, teamFromGame, teamFromSite } from "@app/routes-core.mjs"
+import { EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes, jobRoutes, simulate, skillPools, teamFromGame, teamFromSite } from "@app/routes-core.mjs"
 import { kvGet, kvSet } from "./kv.js"
 import { Jobs } from "./jobs.js"
 import { WasmPool } from "./pool.js"
@@ -130,7 +130,11 @@ export async function localApi(method, p, body = {}) {
   if (p === "/api/simulate" && method === "POST") return simulate(st, body)
   if (p === "/api/gear-cost" && method === "POST") return gearCost(st.m, st.book, body)
   if (p.startsWith("/api/ironcow/")) {
-    const r = ironcowRoutes(st, method, p, body)
+    const r = await ironcowRoutes(st, method, p, body, {
+      load: () => kvGet("ironcow-team", EMPTY_IRONCOW_TEAM),
+      save: team => kvSet("ironcow-team", team),
+      applyGameData: raw => applyEnvelope(decodeGameData({ compressedInitClientData: raw, capturedAt: Date.now() })),
+    })
     if (r !== undefined) return r
   }
   await jobs.ready

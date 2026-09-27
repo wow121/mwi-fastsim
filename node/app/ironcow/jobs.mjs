@@ -7,6 +7,7 @@ import { optimizeSkills } from "../opt-skills.mjs"
 import { optimizeConsumables } from "../opt-consumables.mjs"
 import { IronEvaluator, IRONCOW_OBJECTIVES, normalizeIronCfg } from "./evaluator.mjs"
 import { CraftTimes, LIFE_SKILLS, SKILL_NAMES } from "./craft.mjs"
+import { ironcowFromGame } from "./import.mjs"
 
 const combatConsumables = maps => Object.values(maps.itemDetailMap)
   .filter(i => (i.categoryHrid === "/item_categories/food" || i.categoryHrid === "/item_categories/drink")
@@ -47,11 +48,11 @@ async function consumables(ev0, params, api) {
   const ev = new IronEvaluator(ev0.ctx, params.ironcow)
   let allowItems
   if (params.craftableOnly) {
-    const ct = ev.metrics.craft
-    allowItems = combatConsumables(ev.ctx.m.$e).map(i => i.hrid).filter(h => {
+    // craftable by at least one member (each member makes their own food)
+    allowItems = combatConsumables(ev.ctx.m.$e).map(i => i.hrid).filter(h => ev.metrics.crafts.some(ct => {
       const c = ct.of(h)
       return c.action && !c.missing.size && !c.locked.size
-    })
+    }))
     api.log(`只用现在能手搓的：${allowItems.length} 种`)
   }
   return { ...(await optimizeConsumables(ev, { ...params, objective: ev.objective, allowItems }, api)), ironcowObjective: ev.metrics.cfg.objective }
@@ -66,7 +67,7 @@ export const IRONCOW_JOBS = {
 /** Hand-work time of every combat food / drink (and optional extra items) with its recipe tree. */
 export function craftTable(m, body) {
   const cfg = normalizeIronCfg(body.ironcow)
-  const ct = new CraftTimes(m.$e, cfg.craft)
+  const ct = new CraftTimes(m.$e, cfg.crafts[0])
   const list = [...combatConsumables(m.$e).map(i => i.hrid), ...(body.items || [])]
   return {
     skills: LIFE_SKILLS.map(k => ({ key: k, name: SKILL_NAMES[k] })),
@@ -88,8 +89,25 @@ export function craftTable(m, body) {
   }
 }
 
-/** /api/ironcow/* routes; undefined when the path is not one. */
-export function ironcowRoutes(st, method, p, body) {
+export const EMPTY_IRONCOW_TEAM = { members: [], selected: [], syncedAt: 0 }
+
+/**
+ * /api/ironcow/* routes; resolves to undefined when the path is not one.
+ * host: { load(), save(team) } for the ironcow team, applyGameData(initClientData) → engine context.
+ */
+export async function ironcowRoutes(st, method, p, body, host) {
   if (p === "/api/ironcow/craft" && method === "POST") return craftTable(st.m, body)
+  if (p === "/api/ironcow/team" && method === "GET") return host.load()
+  if (p === "/api/ironcow/team" && method === "PUT") {
+    await host.save({ ...(await host.load()), ...body })
+    return { ok: true }
+  }
+  if (p === "/api/ironcow/game" && method === "POST") {
+    // from the ironcow userscript: the logged-in character (+ the game's initClientData)
+    if (body.initClientData) st = await host.applyGameData(body.initClientData)
+    const { team, reply } = ironcowFromGame(st.m, body.character, await host.load())
+    await host.save(team)
+    return reply
+  }
   return undefined
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.1
+// @version      0.4.2
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -321,6 +321,8 @@
           const o = JSON.parse(event.data)
           if (o.type === "init_character_data") {
             done = true
+            // ironcow characters go to the ironcow team (the separate 铁牛导入 script)
+            if (/ironcow/i.test(String(o.character?.gameMode || ""))) return badge("铁牛角色不进普通队伍（用「铁牛导入」脚本）", false)
             lastRaw = o
             partyNames = resolvePartyNames(o.partyInfo || o.data?.partyInfo, gameState())
             scheduleSend()

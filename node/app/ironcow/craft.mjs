@@ -11,21 +11,32 @@ const GATHERING = new Set(["milking", "foraging", "woodcutting"])
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
 const skillOf = a => String(a?.type || "").replace("/action_types/", "")
 
+export const isGathering = skill => GATHERING.has(skill)
+
 /**
- * cfg: { levels: {skill: level}, speed: {skill: %}, efficiency: {skill: %},
- *        artisan: bool (−10 % inputs), gourmet: bool (+12 % cooking/brewing output),
- *        gatherQty: % (extra gathering output) }
+ * cfg, per life skill: { levels, levelBonus (tea levels; artisan tea's −5 included),
+ *   speed %, efficiency % (tools, gear, house, teas, community), artisan % (fewer inputs),
+ *   output % (gourmet for production, gathering quantity for gathering) }.
+ * Older configs with artisan / gourmet booleans and a single gatherQty are still read.
  */
 export function normalizeCraftCfg(cfg = {}) {
-  const per = (o, d) => Object.fromEntries(LIFE_SKILLS.map(s => [s, Math.max(0, num(o?.[s], d))]))
-  return {
+  const per = (o, d, f = () => d) => Object.fromEntries(LIFE_SKILLS.map(s => [s, num(o && typeof o === "object" ? o[s] : undefined, f(s))]))
+  const legacyArtisan = s => (cfg.artisan === true && !GATHERING.has(s) ? 10 : 0)
+  const legacyOutput = s => (GATHERING.has(s) ? num(cfg.gatherQty, 0) : cfg.gourmet === true && (s === "cooking" || s === "brewing") ? 12 : 0)
+  const out = {
     levels: per(cfg.levels, 1),
+    levelBonus: per(cfg.levelBonus, 0),
     speed: per(cfg.speed, 0),
     efficiency: per(cfg.efficiency, 0),
-    artisan: !!cfg.artisan,
-    gourmet: !!cfg.gourmet,
-    gatherQty: Math.max(0, num(cfg.gatherQty, 0)),
+    artisan: per(cfg.artisan, 0, legacyArtisan),
+    output: per(cfg.output, 0, legacyOutput),
   }
+  for (const s of LIFE_SKILLS) {
+    out.levels[s] = Math.max(1, out.levels[s])
+    for (const k of ["speed", "efficiency", "output"]) out[k][s] = Math.max(0, out[k][s])
+    out.artisan[s] = Math.min(100, Math.max(0, out.artisan[s]))
+  }
+  return out
 }
 
 export class CraftTimes {
@@ -52,7 +63,7 @@ export class CraftTimes {
   actionSeconds(a, skill) {
     const c = this.cfg
     const req = num(a.levelRequirement?.level, 1)
-    const eff = Math.max(0, c.levels[skill] - req) / 100 + c.efficiency[skill] / 100
+    const eff = Math.max(0, c.levels[skill] + c.levelBonus[skill] - req) / 100 + c.efficiency[skill] / 100
     return num(a.baseTimeCost) / 1e9 / (1 + c.speed[skill] / 100) / (1 + eff)
   }
 
@@ -66,12 +77,12 @@ export class CraftTimes {
       for (const mk of this.makers.get(hrid) || []) {
         const a = mk.action
         const t = this.actionSeconds(a, mk.skill)
-        const locked = new Set(c.levels[mk.skill] < num(a.levelRequirement?.level, 1) ? [`${zh(this.maps, a.hrid)}（${SKILL_NAMES[mk.skill]} ${a.levelRequirement.level} 级）`] : [])
+        const locked = new Set(c.levels[mk.skill] + c.levelBonus[mk.skill] < num(a.levelRequirement?.level, 1) ? [`${zh(this.maps, a.hrid)}（${SKILL_NAMES[mk.skill]} ${a.levelRequirement.level} 级）`] : [])
         let r
-        if (mk.gather) r = { seconds: t / (mk.gather * (1 + c.gatherQty / 100)), action: a.hrid, skill: mk.skill, inputs: [], missing: new Set(), locked }
+        if (mk.gather) r = { seconds: t / (mk.gather * (1 + c.output[mk.skill] / 100)), action: a.hrid, skill: mk.skill, inputs: [], missing: new Set(), locked }
         else {
-          const out = mk.count * (c.gourmet && (mk.skill === "cooking" || mk.skill === "brewing") ? 1.12 : 1)
-          const inputs = (a.inputItems || []).map(i => ({ hrid: i.itemHrid, count: num(i.count) * (c.artisan ? 0.9 : 1) / out }))
+          const out = mk.count * (1 + c.output[mk.skill] / 100)
+          const inputs = (a.inputItems || []).map(i => ({ hrid: i.itemHrid, count: num(i.count) * (1 - c.artisan[mk.skill] / 100) / out }))
           if (a.upgradeItemHrid) inputs.push({ hrid: a.upgradeItemHrid, count: 1 / out })
           r = { seconds: t / out, action: a.hrid, skill: mk.skill, inputs, missing: new Set(), locked }
           for (const i of inputs) {

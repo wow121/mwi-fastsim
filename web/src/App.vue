@@ -14,6 +14,7 @@ function applyDark() {
 // browser mode: the userscript hands over what it captured on the game page / the sim site
 async function onUserscript(e) {
   const d = e.data
+  if (e.origin === location.origin && d?.source === "mwi-fastsim-ironcow-userscript" && d.type === "ironcow") return onIroncow(d)
   if (e.origin !== location.origin || d?.source !== "mwi-fastsim-userscript" || d.type !== "data") return
   const seen = Number(localStorage.getItem("fastsim-userscript-seen") || 0)
   const items = [["game", "/api/game", "游戏"], ["site", "/api/sync", "模拟网站"]].filter(([k]) => d[k] && d[k].capturedAt > seen)
@@ -28,6 +29,23 @@ async function onUserscript(e) {
       ElMessage.error(`从${label}导入失败：${err.message}`)
     }
   }
+}
+// browser mode: characters captured by the separate ironcow userscript go to the ironcow team
+async function onIroncow(d) {
+  const seen = Number(localStorage.getItem("fastsim-ironcow-seen") || 0)
+  const fresh = (d.captures || []).filter(c => c?.character && c.capturedAt > seen).sort((a, b) => a.capturedAt - b.capturedAt)
+  let clientData = d.initClientData
+  for (const c of fresh) {
+    try {
+      await call("POST", "/api/ironcow/game", { character: c.character, initClientData: clientData || undefined })
+      clientData = null
+      localStorage.setItem("fastsim-ironcow-seen", String(c.capturedAt))
+      ElMessage.success(`铁牛：已导入 ${c.name}`)
+    } catch (err) {
+      ElMessage.error(`铁牛导入 ${c.name} 失败：${err.message}`)
+    }
+  }
+  if (fresh.length) window.dispatchEvent(new Event("fastsim-ironcow-updated"))
 }
 onMounted(async () => {
   applyDark()
