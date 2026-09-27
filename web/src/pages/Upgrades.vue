@@ -64,6 +64,9 @@ function onResult(r) {
 const slotNames = computed(() => [...new Set((result.value?.rows || []).map(r => r.slotName))])
 const rows = computed(() => (result.value?.rows || []).filter(r => !kinds.value.length || kinds.value.includes(r.slotName)))
 const sign = v => (v >= 0 ? "+" : "") + money(v)
+// combat score as a plain number (fair value in millions, like MWITools' build score)
+const score = v => (v == null || !Number.isFinite(v) ? "—" : (v / 1e6).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))
+const signScore = v => (v >= 0 ? "+" : "") + score(v)
 const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
 </script>
 
@@ -149,11 +152,11 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
             <p>
               {{ p.days }} 天后总资产比什么都不买 <b :class="p.gain >= 0 ? 'good' : 'bad'">{{ sign(p.gain) }}</b>，
               全部做完后全队每天多赚约 <b>{{ money(p.finalIncome - result.income) }}</b>，
-              战斗评分 <b>+{{ money(p.scoreGain) }}</b>
+              战斗评分 <b>{{ signScore(p.scoreGain) }}</b>
               <span v-if="p.check" class="muted">（终态整队实测 {{ sign(p.check.actual) }}/天 ± {{ money(1.96 * p.check.sig.se * 24) }}，逐项相加估计 {{ sign(p.check.estimated) }}/天）</span>
             </p>
             <p class="muted">每个角色只用自己的现金和自己的收入买自己的装备。
-              <template v-for="x in p.perMember || []" :key="x.name">{{ x.name }}：收入 {{ money(x.startIncome) }} → {{ money(x.income) }}/天，期末现金 {{ money(x.cash) }}<template v-if="x.score != null">，战斗评分 {{ money(x.score) }} → {{ money(x.scoreAfter) }}</template>；</template>
+              <template v-for="x in p.perMember || []" :key="x.name">{{ x.name }}：收入 {{ money(x.startIncome) }} → {{ money(x.income) }}/天，期末现金 {{ money(x.cash) }}<template v-if="x.score != null">，战斗评分 {{ score(x.score) }} → {{ score(x.scoreAfter) }}</template>；</template>
             </p>
             <el-table :data="p.steps" size="small">
               <el-table-column label="时间" width="100"><template #default="{ row }">{{ day(row.day) }}</template></el-table-column>
@@ -165,7 +168,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
               <el-table-column label="花费" width="100" align="right"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
               <el-table-column label="损耗" width="100" align="right"><template #default="{ row }">{{ money(row.loss) }}</template></el-table-column>
               <el-table-column label="全队利润/天" width="110" align="right"><template #default="{ row }"><span :class="row.dProfitPerDay > 0 ? 'good' : 'bad'">{{ sign(row.dProfitPerDay) }}</span></template></el-table-column>
-              <el-table-column label="战斗评分" width="100" align="right"><template #default="{ row }">{{ row.dScore == null ? "" : sign(row.dScore) }}</template></el-table-column>
+              <el-table-column label="战斗评分" width="100" align="right"><template #default="{ row }">{{ row.dScore == null ? "" : signScore(row.dScore) }}</template></el-table-column>
               <el-table-column label="该角色余额" width="100" align="right"><template #default="{ row }">{{ money(row.cashAfter) }}</template></el-table-column>
             </el-table>
             <p class="muted">预估现金 = 按起始现金和每天收入推算，这一步花钱前该角色手上的钱；花费 = 实际掏出的现金（已扣掉卖旧装备回收的钱）；损耗 = 花费 − 新装备能卖回的钱 + 旧装备能卖回的钱，即这一步真正亏掉的差价、税和精炼/镜子材料。</p>
@@ -198,7 +201,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <el-table-column v-for="d in result.horizons" :key="d" :label="`${d} 天净收益`" width="115" align="right" sortable :sort-method="(a, b) => a.net[d] - b.net[d]">
           <template #default="{ row }"><span :class="row.net[d] > 0 ? 'good' : 'bad'">{{ sign(row.net[d]) }}</span></template>
         </el-table-column>
-        <el-table-column prop="dScore" label="战斗评分" width="100" align="right" sortable><template #default="{ row }">{{ row.dScore == null ? "" : sign(row.dScore) }}</template></el-table-column>
+        <el-table-column prop="dScore" label="战斗评分" width="100" align="right" sortable><template #default="{ row }">{{ row.dScore == null ? "" : signScore(row.dScore) }}</template></el-table-column>
         <el-table-column prop="dOwnPerDay" label="自己/天" width="100" align="right" sortable><template #default="{ row }">{{ row.dOwnPerDay == null ? "" : sign(row.dOwnPerDay) }}</template></el-table-column>
         <el-table-column prop="dXpPerHour" label="经验/小时" width="100" align="right" sortable><template #default="{ row }">{{ row.dXpPerHour >= 0 ? "+" : "" }}{{ int(row.dXpPerHour) }}</template></el-table-column>
         <el-table-column label="精度" width="60" align="center"><template #default="{ row }"><span :class="row.refined ? '' : 'muted'">{{ row.guild ? "" : row.refined ? "复核" : "初筛" }}</span></template></el-table-column>

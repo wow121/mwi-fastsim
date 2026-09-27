@@ -607,7 +607,7 @@ export async function adviseUpgrades(ev, params, api) {
   members.forEach((_, k) => api.log(`  ${name(k)}：现金 ${fmtM(budget[k])}，战斗利润 ${fmtM(own[k])}/天，其他收入 ${fmtM(otherIncome[k])}/天`))
   const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, { maxSpend: budget[idx] + Math.max(0, income[idx]) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3, fair }))
   const scores = members.map(c => combatScore(maps, c, fair))
-  api.log(`战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：${members.map((_, k) => `${name(k)} ${fmtM(scores[k])}`).join("，")}`)
+  api.log(`战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：${members.map((_, k) => `${name(k)} ${fmtScore(scores[k])}`).join("，")}`)
   const jobs = slots.flatMap((sl, s) => sl.states.slice(1).map((st, k) => ({ s, j: k + 1, st })))
   api.log(`${slots.length} 个位置，共 ${jobs.length} 个可达状态需要模拟`)
   let done = 0
@@ -749,13 +749,18 @@ export async function adviseUpgrades(ev, params, api) {
     const scoreAfter = members.map((_, k) => scores[k] + r.held.reduce((a, j, s) => a + (slots[s].member === k ? S[s][j] - S[s][0] : 0), 0))
     const perMember = members.map((_, k) => ({ name: name(k), cash: r.cash[k], income: r.incomes[k], startIncome: income[k], score: scores[k], scoreAfter: scoreAfter[k] }))
     plans.push({ days, wealth: r.wealth, idle, gain: r.wealth - idle, incomeGain: r.income - idleRun.income, scoreGain: r.score, steps, final, check, finalIncome: r.income, perMember, members: mem })
-    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}，日利润 +${fmtM(r.income - idleRun.income)}/天，战斗评分 +${fmtM(r.score)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
+    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}，日利润 +${fmtM(r.income - idleRun.income)}/天，战斗评分 +${fmtScore(r.score)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
   }
   return { keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length, refineHours, refineSeeds: refineSeeds.length, refinedCount: picks.length, refineTop, objective: mode, paybackDays: payback, scores }
 }
 
 function fmtM(v) {
   return Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : `${(v / 1e6).toFixed(1)}M`
+}
+
+/** Combat score as a plain number (fair value in millions, like MWITools' build score). */
+function fmtScore(v) {
+  return (v / 1e6).toFixed(1)
 }
 
 /**
