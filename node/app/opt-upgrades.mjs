@@ -530,11 +530,12 @@ function runPlan(plan, P) {
     t += wait
     for (let q = 0; q < n; q++) cash[q] += inc[q] * wait
     const i = held[s]
+    const cashBefore = cash[k]
     cash[k] = Math.max(0, cash[k] - c)
     held[s] = j
     for (let q = 0; q < n; q++) inc[q] += P.dpv[s][j][q] - P.dpv[s][i][q]
     ptr[k]++
-    steps.push({ s, from: i, to: j, day: t, cost: c, how: P.pay[s][i][j].how, cashAfter: cash[k], incomeAfter: inc[k] })
+    steps.push({ s, from: i, to: j, day: t, cost: c, how: P.pay[s][i][j].how, cashBefore, cashAfter: cash[k], incomeAfter: inc[k] })
   }
   const endCash = cash.map((c, q) => c + inc[q] * (P.days - t))
   const wealth = endCash.reduce((a, v) => a + v, 0) + held.reduce((a, j, s) => a + P.Lend[s][j], 0)
@@ -740,7 +741,7 @@ export async function adviseUpgrades(ev, params, api) {
       const sl = slots[x.s]
       return {
         day: x.day, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[x.from].label, to: sl.states[x.to].label,
-        cost: x.cost, how: x.how, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: planDp[x.s][x.to] - planDp[x.s][x.from],
+        cost: x.cost, how: x.how, cashBefore: x.cashBefore, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: planDp[x.s][x.to] - planDp[x.s][x.from],
         loss: x.cost - L[x.s][x.to] + L[x.s][x.from], dScore: S[x.s][x.to] - S[x.s][x.from],
       }
     })

@@ -161,13 +161,14 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
               <el-table-column prop="slotName" label="位置" width="80" />
               <el-table-column label="变化" min-width="220"><template #default="{ row }">{{ row.from }} → <b>{{ row.to }}</b></template></el-table-column>
               <el-table-column prop="how" label="做法" min-width="200" />
+              <el-table-column label="预估现金" width="100" align="right"><template #default="{ row }">{{ money(row.cashBefore) }}</template></el-table-column>
               <el-table-column label="花费" width="100" align="right"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
               <el-table-column label="损耗" width="100" align="right"><template #default="{ row }">{{ money(row.loss) }}</template></el-table-column>
               <el-table-column label="全队利润/天" width="110" align="right"><template #default="{ row }"><span :class="row.dProfitPerDay > 0 ? 'good' : 'bad'">{{ sign(row.dProfitPerDay) }}</span></template></el-table-column>
               <el-table-column label="战斗评分" width="100" align="right"><template #default="{ row }">{{ row.dScore == null ? "" : sign(row.dScore) }}</template></el-table-column>
               <el-table-column label="该角色余额" width="100" align="right"><template #default="{ row }">{{ money(row.cashAfter) }}</template></el-table-column>
             </el-table>
-            <p class="muted">花费 = 实际掏出的现金（已扣掉卖旧装备回收的钱）；损耗 = 花费 − 新装备能卖回的钱 + 旧装备能卖回的钱，即这一步真正亏掉的差价、税和精炼/镜子材料。</p>
+            <p class="muted">预估现金 = 按起始现金和每天收入推算，这一步花钱前该角色手上的钱；花费 = 实际掏出的现金（已扣掉卖旧装备回收的钱）；损耗 = 花费 − 新装备能卖回的钱 + 旧装备能卖回的钱，即这一步真正亏掉的差价、税和精炼/镜子材料。</p>
           </template>
         </el-tab-pane>
       </el-tabs>
