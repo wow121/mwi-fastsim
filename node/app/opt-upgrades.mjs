@@ -321,6 +321,7 @@ export function memberSlots(ctx, gp, members, idx, opts) {
         return ok ? gp.transition(a.h, a.n, b.h, b.n) : { cost: INF, how: "" }
       },
       value: s => gp.value(s.h, s.n),
+      score: s => (s.h && opts.fair ? opts.fair(s.h, s.n) : 0),
     })
   }
   // Ability and house levels are part of the wealth, like gear: valued at what their books /
@@ -357,6 +358,8 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       key: `${idx}:ability${i}`, member: idx, memberName: who, slot: `ability${i}`, slotName: `技能 ${i + 1}`, states,
       trans: (x, y) => (y.level > x.level ? { cost: count(x.level, y.level) * price, how: `${count(x.level, y.level)} 本书` } : { cost: INF, how: "" }),
       value: st => count(from, st.level) * resale(b.item),
+      // combat score: the books from level 0 (MWITools: experience / book experience + 1 books)
+      score: st => (opts.fair ? (Number(xpTable[st.level] || 0) / b.xp + 1) * opts.fair(b.item, 0) : 0),
     })
   })
   // house rooms: +1..+maxHouseUp levels; cost = upgrade materials at the market ask + coins
@@ -400,6 +403,13 @@ export function memberSlots(ctx, gp, members, idx, opts) {
         value: st => {
           let v = 0
           for (let L = from + 1; L <= st.level; L++) v += levelValue(L)
+          return v
+        },
+        // combat score: all materials from level 1 at their fair value
+        score: st => {
+          if (!opts.fair) return 0
+          let v = 0
+          for (let L = 1; L <= st.level; L++) for (const i of costs[L] || []) v += opts.fair(i.itemHrid, 0) * Number(i.count || 0)
           return v
         },
       })
@@ -476,6 +486,19 @@ export function guildSlots(maps, members, opts = {}) {
  * its own purchases in plan order, each as soon as its own cash is there; incomes change for
  * everyone after each purchase (a stronger teammate changes everyone's drops).
  */
+/**
+ * Value of a plan's outcome for the chosen objective:
+ * "wealth" (default): cash + what the held gear / levels would sell for at the horizon;
+ * "income": that wealth + the daily profit at the horizon over `paybackDays` more days (the money
+ *   spent may take that long to come back: a 3B buy for +1M/day on the last day is not worth it);
+ * "score": the rise of the combat score (fair value of the build), ties broken by wealth.
+ */
+function objective(r, P) {
+  if (P.mode === "income") return r.wealth + r.income * P.payback
+  if (P.mode === "score") return r.score + r.wealth * 1e-6
+  return r.wealth
+}
+
 function runPlan(plan, P) {
   const n = P.budget.length
   const held = P.slots.map(() => 0)
@@ -492,8 +515,9 @@ function runPlan(plan, P) {
       for (; ptr[k] < queues[k].length; ptr[k]++) {
         const [s, j] = queues[k][ptr[k]]
         const i = held[s]
-        // only steps that earn more and are reachable
-        if (i !== j && P.dp[s][j] > P.dp[s][i] && P.pay[s][i][j].cost < INF) break
+        // only steps that earn more (score: that raise the combat score) and are reachable
+        const better = P.mode === "score" ? P.S[s][j] > P.S[s][i] : P.dp[s][j] > P.dp[s][i]
+        if (i !== j && better && P.pay[s][i][j].cost < INF) break
       }
       if (ptr[k] >= queues[k].length) continue
       const [s, j] = queues[k][ptr[k]]
@@ -514,7 +538,8 @@ function runPlan(plan, P) {
   }
   const endCash = cash.map((c, q) => c + inc[q] * (P.days - t))
   const wealth = endCash.reduce((a, v) => a + v, 0) + held.reduce((a, j, s) => a + P.Lend[s][j], 0)
-  return { wealth, steps, held, income: inc.reduce((a, v) => a + v, 0), incomes: inc, cash: endCash }
+  const score = held.reduce((a, j, s) => a + P.S[s][j] - P.S[s][0], 0)
+  return { wealth, steps, held, score, income: inc.reduce((a, v) => a + v, 0), incomes: inc, cash: endCash }
 }
 
 /** Greedy insertion, then best-improvement local search (remove / change target / swap). */
@@ -522,12 +547,12 @@ async function searchPlan(P, signal) {
   const moves = []
   P.slots.forEach((sl, s) => sl.states.forEach((_, j) => j > 0 && moves.push([s, j])))
   let plan = []
-  let best = runPlan(plan, P).wealth
+  let best = objective(runPlan(plan, P), P)
   const tryPlans = (cands) => {
     let improved = false
     for (const c of cands) {
-      const w = runPlan(c, P).wealth
-      if (w > best + 1) {
+      const w = objective(runPlan(c, P), P)
+      if (w > best + (P.mode === "score" ? 1e-3 : 1)) {
         best = w
         plan = c
         improved = true
@@ -568,6 +593,9 @@ export async function adviseUpgrades(ev, params, api) {
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
   const maps = ev.ctx.m.$e
   const gp = new GearPrices(maps, pricedBook(ev.ctx.book, params), tax, { refinedResale: params.refinedResale })
+  const mode = ["income", "score"].includes(params.objective) ? params.objective : "wealth"
+  const payback = Math.max(0, Number(params.paybackDays ?? 180))
+  const fair = fairValue(maps, ev.ctx.book, gp)
 
   const baseline = await ev.evaluate(members, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
   const P0 = baseline.mean.profitPerHour * 24
@@ -576,7 +604,9 @@ export async function adviseUpgrades(ev, params, api) {
   const name = k => members[k].name || `队员${k + 1}`
   api.log(`当前全队利润 ${fmtM(P0)}/天，卖出税 ${(tax * 100).toFixed(1)}%，镜子 ${fmtM(gp.mirror)}`)
   members.forEach((_, k) => api.log(`  ${name(k)}：现金 ${fmtM(budget[k])}，战斗利润 ${fmtM(own[k])}/天，其他收入 ${fmtM(otherIncome[k])}/天`))
-  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, { maxSpend: budget[idx] + Math.max(0, income[idx]) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3 }))
+  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, { maxSpend: budget[idx] + Math.max(0, income[idx]) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3, fair }))
+  const scores = members.map(c => combatScore(maps, c, fair))
+  api.log(`战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：${members.map((_, k) => `${name(k)} ${fmtM(scores[k])}`).join("，")}`)
   const jobs = slots.flatMap((sl, s) => sl.states.slice(1).map((st, k) => ({ s, j: k + 1, st })))
   api.log(`${slots.length} 个位置，共 ${jobs.length} 个可达状态需要模拟`)
   let done = 0
@@ -597,6 +627,7 @@ export async function adviseUpgrades(ev, params, api) {
     info[e.s][e.j] = e
   }
   const L = slots.map(sl => sl.states.map(st => sl.value(st)))
+  const S = slots.map(sl => sl.states.map(st => (sl.score ? sl.score(st) : 0)))
   // gear still held at the horizon: taxed resale value, or untaxed when it is kept
   const Lend = params.keepEnd && tax < 1 ? L.map(r => r.map(v => v / (1 - tax))) : L
   const pay = slots.map(sl => sl.states.map(a => sl.states.map(b => (a === b ? { cost: 0, how: "" } : sl.trans(a, b)))))
@@ -606,7 +637,8 @@ export async function adviseUpgrades(ev, params, api) {
   // the plan then swings with any small change of the team. Re-simulate the states that could pay
   // off within the longest horizon (optimistic screening estimate) with more, fresh seeds, and plan
   // with those numbers only; the rest stay in the table as screening results.
-  const H = horizons.at(-1)
+  // how long an upgrade has to pay off: the longest horizon (+ the payback days when aiming at income)
+  const H = horizons.at(-1) + (mode === "income" ? payback : 0)
   const refineHours = Math.min(48, hours * 2)
   const refineSeeds = seedList(55555, Math.min(64, seeds.length * 4))
   const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 60)))
@@ -639,13 +671,15 @@ export async function adviseUpgrades(ev, params, api) {
       info[e.s][e.j] = e
       refined[e.s][e.j] = true
     }
-  } else if (!refineTop) {
-    // re-check turned off: plan with the screening numbers
+  } else if (refineTop) api.log("初筛没有找到可能在规划期内回本的提升")
+  // re-check turned off, or aiming at the combat score (there the profit only sets how fast the
+  // money comes in, the choice is made by the score): the other states use the screening numbers
+  if (!refineTop || mode === "score")
     slots.forEach((sl, s) => sl.states.forEach((_, j) => {
+      if (refined[s][j]) return
       planDp[s][j] = dp[s][j]
       planDpv[s][j] = dpv[s][j]
     }))
-  } else api.log("初筛没有找到可能在规划期内回本的提升")
 
   // per-state table (from the current state)
   const rows = []
@@ -655,7 +689,7 @@ export async function adviseUpgrades(ev, params, api) {
     const loss = t.cost - L[s][j] + L[s][0]
     rows.push({
       id: `${sl.key}#${j}`, member: sl.member, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, label: st.label,
-      cost: t.cost, how: t.how, loss, dProfitPerDay: dp[s][j], dOwnPerDay: dpv[s][j][sl.member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig, refined: refined[s][j],
+      cost: t.cost, how: t.how, loss, dProfitPerDay: dp[s][j], dOwnPerDay: dpv[s][j][sl.member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig, refined: refined[s][j], dScore: S[s][j] - S[s][0],
       net: Object.fromEntries(horizons.map(d => [d, dp[s][j] * d - loss])),
       paybackDays: dp[s][j] > 0 ? loss / dp[s][j] : null,
     })
@@ -688,11 +722,12 @@ export async function adviseUpgrades(ev, params, api) {
   for (const days of horizons) {
     if (api.signal.aborted) throw new Error("cancelled")
     api.progress(0, 1, `规划 ${days} 天`)
-    const P = { slots, dp: planDp, dpv: planDpv, L, Lend, pay, budget, income, days }
+    const P = { slots, dp: planDp, dpv: planDpv, L, Lend, S, pay, budget, income, days, mode, payback }
     const ts = Date.now()
     const r = await searchPlan(P, api.signal)
     api.log(`规划 ${days} 天用时 ${Date.now() - ts} ms`)
-    const idle = runPlan([], P).wealth
+    const idleRun = runPlan([], P)
+    const idle = idleRun.wealth
     const mem = clone(members)
     r.held.forEach((j, s) => j && slots[s].states[j].apply(mem[slots[s].member]))
     let check = null
@@ -706,17 +741,67 @@ export async function adviseUpgrades(ev, params, api) {
       return {
         day: x.day, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[x.from].label, to: sl.states[x.to].label,
         cost: x.cost, how: x.how, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: planDp[x.s][x.to] - planDp[x.s][x.from],
-        loss: x.cost - L[x.s][x.to] + L[x.s][x.from],
+        loss: x.cost - L[x.s][x.to] + L[x.s][x.from], dScore: S[x.s][x.to] - S[x.s][x.from],
       }
     })
     const final = r.held.map((j, s) => ({ j, s })).filter(x => x.j).map(({ j, s }) => ({ memberName: slots[s].memberName, slotName: slots[s].slotName, from: slots[s].states[0].label, to: slots[s].states[j].label }))
-    const perMember = members.map((_, k) => ({ name: name(k), cash: r.cash[k], income: r.incomes[k], startIncome: income[k] }))
-    plans.push({ days, wealth: r.wealth, idle, gain: r.wealth - idle, steps, final, check, finalIncome: r.income, perMember, members: mem })
-    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
+    const scoreAfter = members.map((_, k) => scores[k] + r.held.reduce((a, j, s) => a + (slots[s].member === k ? S[s][j] - S[s][0] : 0), 0))
+    const perMember = members.map((_, k) => ({ name: name(k), cash: r.cash[k], income: r.incomes[k], startIncome: income[k], score: scores[k], scoreAfter: scoreAfter[k] }))
+    plans.push({ days, wealth: r.wealth, idle, gain: r.wealth - idle, incomeGain: r.income - idleRun.income, scoreGain: r.score, steps, final, check, finalIncome: r.income, perMember, members: mem })
+    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}，日利润 +${fmtM(r.income - idleRun.income)}/天，战斗评分 +${fmtM(r.score)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
   }
-  return { keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length, refineHours, refineSeeds: refineSeeds.length, refinedCount: picks.length, refineTop }
+  return { keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length, refineHours, refineSeeds: refineSeeds.length, refinedCount: picks.length, refineTop, objective: mode, paybackDays: payback, scores }
 }
 
 function fmtM(v) {
   return Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : `${(v / 1e6).toFixed(1)}M`
+}
+
+/**
+ * Fair value of an item at a level, for the combat score (after MWITools' build score): the
+ * market value, else the middle of the ask and the bid (inside the tradable band); enhanced gear
+ * at what it costs to get (market, mirrors, refining), like MWITools' acquisition value.
+ */
+function fairValue(maps, rawBook, gp) {
+  const book = pricedBook(rawBook, {}) // band only: the fair value doesn't depend on buying / selling at the ask or bid
+  const cache = new Map()
+  return (h, n = 0) => {
+    if (!h) return 0
+    if (h === "/items/coin") return 1
+    const key = `${h}#${n}`
+    if (cache.has(key)) return cache.get(key)
+    const q = book.enhancedQuote(h, n) || { ask: -1, bid: -1 }
+    const p = Number(rawBook.market?.[h]?.[String(n)]?.p) || 0
+    const market = p > 0 ? p : q.ask > 0 && q.bid > 0 ? (q.ask + q.bid) / 2 : q.ask > 0 ? q.ask : q.bid > 0 ? q.bid : 0
+    let v = market
+    if (maps.itemDetailMap[h]?.equipmentDetail) {
+      const acq = gp.acq(h)?.[n]?.cost
+      if (acq > 0 && acq < INF && (n > 0 || !(v > 0))) v = acq
+    }
+    if (!(v > 0)) v = rawBook.priceOrShop(h, "ask") || 0
+    cache.set(key, v)
+    return v
+  }
+}
+
+/** Combat score of a member (MWITools' build score without the guild shrines): combat gear + combat house rooms + equipped abilities, at fair value. */
+export function combatScore(maps, cfg, fair) {
+  let v = 0
+  for (const e of Object.values(cfg.equipment || {})) {
+    const d = maps.itemDetailMap[e?.itemHrid]?.equipmentDetail
+    if (!d || !(Object.keys(d.combatStats || {}).length || Object.keys(d.combatEnhancementBonuses || {}).length)) continue
+    v += fair(e.itemHrid, Math.max(0, Math.floor(Number(e.enhancementLevel || 0))))
+  }
+  for (const [room, lv] of Object.entries(cfg.houseRooms || {})) {
+    const r = maps.houseRoomDetailMap?.[room]
+    if (!r?.usableInActionTypeMap?.["/action_types/combat"]) continue
+    for (let L = 1; L <= Number(lv || 0); L++) for (const i of r.upgradeCostsMap?.[L] || []) v += fair(i.itemHrid, 0) * Number(i.count || 0)
+  }
+  const books = bookInfo(maps)
+  const xpTable = maps.levelExperienceTable || []
+  for (const a of cfg.abilities || []) {
+    const b = books[a?.abilityHrid]
+    if (b) v += (Number(xpTable[a.level] || 0) / b.xp + 1) * fair(b.item, 0)
+  }
+  return v
 }

@@ -32,12 +32,19 @@ if (!plan.value.cash) plan.value.cash = {}
 if (!plan.value.other) plan.value.other = {}
 if (plan.value.houses == null) plan.value.houses = true
 if (plan.value.guild == null) plan.value.guild = true
+if (!plan.value.objective) plan.value.objective = "wealth"
+if (plan.value.paybackDays == null) plan.value.paybackDays = 180
 if (!plan.value.buyPrice) plan.value.buyPrice = "ask"
 if (!plan.value.sellPrice) plan.value.sellPrice = "bid"
 delete plan.value.budget
 delete plan.value.otherIncome
 watch(plan, v => save("fastsim-upgrade-plan", v), { deep: true })
 const result = ref(null)
+const OBJECTIVE_TEXT = {
+  wealth: "期末现金 + 装备、技能、房子能卖的钱最多：只做规划期内能回本的提升",
+  income: "期末日利润最高，花的钱要在规划期 + 上面的天数内赚回来",
+  score: "期末战斗评分（装备、战斗房子、已装备技能的市价，参照 MWITools，不含公会）涨得最多，评分一样时比总资产",
+}
 const kinds = ref([])
 const tab = ref("")
 
@@ -47,7 +54,7 @@ function params() {
   const p = plan.value
   return {
     members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value, replacements: replacements.value, optimize: optimize.value,
-    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedUnrefine ? "unrefine" : "market", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
+    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedUnrefine ? "unrefine" : "market", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd, buyPrice: p.buyPrice, sellPrice: p.sellPrice, objective: p.objective, paybackDays: p.paybackDays,
   }
 }
 function onResult(r) {
@@ -67,7 +74,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
       <p class="muted" style="margin-top: 0">
         先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级、房子 +1～+3 级）逐个模拟，得到每项每天多赚多少；
         队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 60 项）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字；
-        再按你的现金和每天收入排出购买顺序：钱够了就买，目标是规划期末的总资产（现金 + 身上装备、技能等级、房子等级按买一价扣税估的价值）最高。
+        再按你的现金和每天收入排出购买顺序：钱够了就买。目标可选：总资产优先（期末现金 + 身上装备、技能等级、房子等级按卖出价扣税估的价值最高）、日利润优先（期末日利润最高，花的钱要在规定天数内赚回）、战斗评分优先（期末战斗评分涨得最多）。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
         买入默认按市场最低卖价（直接买），卖出默认按最高买价（直接卖）并扣卖出税，可以改成挂单价（挂买单买、挂卖单卖，价格更好但要等成交）；过渡装备以后卖掉时的差价和税都算在损耗里。
         技能书和房子升级材料的钱不算白花：技能等级和房子等级跟装备一样计入总资产，按书和材料的买一价扣税（金币按原值）估值，所以损耗只是买卖差价和税。公会加成每人最多升到自己公会神殿的等级，花公会代币和公会币、不花金币，只在单项表里列出供参考，不进购买计划。
@@ -92,6 +99,18 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
           <el-radio-button value="bid">买一价（直接卖）</el-radio-button>
           <el-radio-button value="ask">卖一价（挂卖单）</el-radio-button>
         </el-radio-group>
+      </div>
+      <div class="row" style="margin-bottom: 8px">
+        <span class="muted">目标</span>
+        <el-radio-group v-model="plan.objective" size="small">
+          <el-radio-button value="wealth">总资产优先</el-radio-button>
+          <el-radio-button value="income">日利润优先</el-radio-button>
+          <el-radio-button value="score">战斗评分优先</el-radio-button>
+        </el-radio-group>
+        <template v-if="plan.objective === 'income'">
+          <span class="muted">花的钱允许</span><el-input-number v-model="plan.paybackDays" :min="0" :max="720" :step="30" size="small" /><span class="muted">天内赚回（到期后还按这套配置刷的天数）</span>
+        </template>
+        <span class="muted">{{ OBJECTIVE_TEXT[plan.objective] }}</span>
       </div>
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">规划天数</span>
@@ -125,15 +144,16 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
       </template>
       <el-tabs v-model="tab">
         <el-tab-pane v-for="p in result.plans" :key="p.days" :name="String(p.days)" :label="`${p.days} 天`">
-          <el-alert v-if="!p.steps.length" type="info" :closable="false" :title="`${p.days} 天内没有值得做的提升：任何购买的损耗都超过这段时间多赚的钱`" />
+          <el-alert v-if="!p.steps.length" type="info" :closable="false" :title="result.objective === 'score' ? `${p.days} 天内攒的钱不够做任何能提高战斗评分的提升` : `${p.days} 天内没有值得做的提升：任何购买的损耗都超过这段时间多赚的钱`" />
           <template v-else>
             <p>
-              {{ p.days }} 天后总资产比什么都不买多 <b class="good">{{ money(p.gain) }}</b>，
-              全部做完后全队每天多赚约 <b>{{ money(p.finalIncome - result.income) }}</b>
+              {{ p.days }} 天后总资产比什么都不买 <b :class="p.gain >= 0 ? 'good' : 'bad'">{{ sign(p.gain) }}</b>，
+              全部做完后全队每天多赚约 <b>{{ money(p.finalIncome - result.income) }}</b>，
+              战斗评分 <b>+{{ money(p.scoreGain) }}</b>
               <span v-if="p.check" class="muted">（终态整队实测 {{ sign(p.check.actual) }}/天 ± {{ money(1.96 * p.check.sig.se * 24) }}，逐项相加估计 {{ sign(p.check.estimated) }}/天）</span>
             </p>
             <p class="muted">每个角色只用自己的现金和自己的收入买自己的装备。
-              <template v-for="x in p.perMember || []" :key="x.name">{{ x.name }}：收入 {{ money(x.startIncome) }} → {{ money(x.income) }}/天，期末现金 {{ money(x.cash) }}；</template>
+              <template v-for="x in p.perMember || []" :key="x.name">{{ x.name }}：收入 {{ money(x.startIncome) }} → {{ money(x.income) }}/天，期末现金 {{ money(x.cash) }}<template v-if="x.score != null">，战斗评分 {{ money(x.score) }} → {{ money(x.scoreAfter) }}</template>；</template>
             </p>
             <el-table :data="p.steps" size="small">
               <el-table-column label="时间" width="100"><template #default="{ row }">{{ day(row.day) }}</template></el-table-column>
@@ -144,6 +164,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
               <el-table-column label="花费" width="100" align="right"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
               <el-table-column label="损耗" width="100" align="right"><template #default="{ row }">{{ money(row.loss) }}</template></el-table-column>
               <el-table-column label="全队利润/天" width="110" align="right"><template #default="{ row }"><span :class="row.dProfitPerDay > 0 ? 'good' : 'bad'">{{ sign(row.dProfitPerDay) }}</span></template></el-table-column>
+              <el-table-column label="战斗评分" width="100" align="right"><template #default="{ row }">{{ row.dScore == null ? "" : sign(row.dScore) }}</template></el-table-column>
               <el-table-column label="该角色余额" width="100" align="right"><template #default="{ row }">{{ money(row.cashAfter) }}</template></el-table-column>
             </el-table>
             <p class="muted">花费 = 实际掏出的现金（已扣掉卖旧装备回收的钱）；损耗 = 花费 − 新装备能卖回的钱 + 旧装备能卖回的钱，即这一步真正亏掉的差价、税和精炼/镜子材料。</p>
@@ -176,6 +197,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <el-table-column v-for="d in result.horizons" :key="d" :label="`${d} 天净收益`" width="115" align="right" sortable :sort-method="(a, b) => a.net[d] - b.net[d]">
           <template #default="{ row }"><span :class="row.net[d] > 0 ? 'good' : 'bad'">{{ sign(row.net[d]) }}</span></template>
         </el-table-column>
+        <el-table-column prop="dScore" label="战斗评分" width="100" align="right" sortable><template #default="{ row }">{{ row.dScore == null ? "" : sign(row.dScore) }}</template></el-table-column>
         <el-table-column prop="dOwnPerDay" label="自己/天" width="100" align="right" sortable><template #default="{ row }">{{ row.dOwnPerDay == null ? "" : sign(row.dOwnPerDay) }}</template></el-table-column>
         <el-table-column prop="dXpPerHour" label="经验/小时" width="100" align="right" sortable><template #default="{ row }">{{ row.dXpPerHour >= 0 ? "+" : "" }}{{ int(row.dXpPerHour) }}</template></el-table-column>
         <el-table-column label="精度" width="60" align="center"><template #default="{ row }"><span :class="row.refined ? '' : 'muted'">{{ row.guild ? "" : row.refined ? "复核" : "初筛" }}</span></template></el-table-column>
