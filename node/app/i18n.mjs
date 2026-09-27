@@ -1,10 +1,14 @@
-// Chinese display names, following the combat-sim site's translator (combatTranslation `s`/`k`):
-// hrid table first, then its English-name dictionary (refined "★" items looked up as "X (R)"),
-// trigger conditions via the ability of the same name. zh-names.mjs is extracted from the
-// site's bundle by node/extract-zh.mjs.
+// Chinese display names: the game's own Chinese names first (zh-game.mjs, by hrid; extracted by
+// node/extract-zh-game.mjs), then the combat-sim site's translator (combatTranslation `s`/`k`) for
+// what the game tables lack: its hrid table, then its English-name dictionary (refined "★" items
+// looked up as "X (R)"), trigger conditions via the ability of the same name. zh-names.mjs is
+// extracted from the site's bundle.
 import names from "./zh-names.mjs"
+import game from "./zh-game.mjs"
 
 const { byName, byHrid } = names
+const OFFICIAL = Object.assign({}, ...Object.values(game))
+const SYMBOLS = { ">=": "≥", "<=": "≤" } // comparators read better as symbols
 
 // the site's trigger vocabulary (`I`) and comparators
 const LABELS = {
@@ -48,6 +52,7 @@ function lookup(en) {
 /** Chinese name of any hrid, falling back to the game's English name. */
 export function zh(maps, hrid) {
   if (!hrid) return ""
+  if (OFFICIAL[hrid]) return SYMBOLS[OFFICIAL[hrid]] || OFFICIAL[hrid]
   if (byHrid[hrid]) return byHrid[hrid]
   const en = nameOf(maps, hrid)
   const hit = lookup(en)

@@ -48,21 +48,21 @@ const preset = (id, label, checked, conditions) => ({ id, label, checked, condit
 export function presets(m, hrid) {
   const t = hrid.split("/").at(-1) || ""
   if (["elemental_affinity", "frenzy", "vampirism"].includes(t))
-    return [preset("default-inactive", "效果未生效", true, [inactive(t)]), preset("mp-safe", "效果未生效 且 MP≥200", false, [inactive(t), mpSafe()])]
+    return [preset("default-inactive", "效果未生效", true, [inactive(t)]), preset("mp-safe", "效果未生效 且 我的当前MP ≥ 200", false, [inactive(t), mpSafe()])]
   if (["precision", "berserk"].includes(t)) return [preset("default-inactive", "效果未生效", true, [inactive(t)])]
   if (["frost_surge", "smoke_burst"].includes(t))
-    return [preset("always", "敌方总 HP≥1", true, [enemyHp(1)]), preset("hp-search", "敌方总 HP≥阈值", false, [enemyHp(2000, "search")])]
-  if (["mana_spring", "ice_spear", "life_drain", "entangle", "fireball"].includes(t)) return [preset("always", "敌方总 HP≥1", true, [enemyHp(1)])]
+    return [preset("always", "所有敌人的当前HP ≥ 1", true, [enemyHp(1)]), preset("hp-search", "所有敌人的当前HP ≥ 阈值", false, [enemyHp(2000, "search")])]
+  if (["mana_spring", "ice_spear", "life_drain", "entangle", "fireball"].includes(t)) return [preset("always", "所有敌人的当前HP ≥ 1", true, [enemyHp(1)])]
   if (t === "water_strike") return [preset("empty", "无条件", true, [])]
   if (["firestorm", "flame_blast"].includes(t))
-    return [preset("always", "敌方总 HP≥1", true, [enemyHp(1)]), preset("hp-search", "敌方总 HP≥阈值", false, [enemyHp(2000, "search")]), preset("multi-hp-search", "存活数≥2 且 敌方总 HP≥阈值", false, [multi(), enemyHp(2000, "search")])]
+    return [preset("always", "所有敌人的当前HP ≥ 1", true, [enemyHp(1)]), preset("hp-search", "所有敌人的当前HP ≥ 阈值", false, [enemyHp(2000, "search")]), preset("multi-hp-search", "所有敌人的存活数 ≥ 2 且 所有敌人的当前HP ≥ 阈值", false, [multi(), enemyHp(2000, "search")])]
   if (["toxic_pollen", "natures_veil"].includes(t))
-    return [preset("hp-search", "敌方总 HP≥阈值", true, [enemyHp(2000, "search")]), preset("multi", "敌方存活数≥2", true, [multi()])]
-  if (t === "quick_aid") return [preset("lowest-hp", "队伍最低 HP≤阈值", true, [lowestHp()]), preset("missing-hp", "队友已损失总 HP≥阈值", false, [missingHp()])]
-  if (t === "rejuvenate") return [preset("missing-hp", "队友已损失总 HP≥阈值", true, [missingHp()]), preset("lowest-hp", "队伍最低 HP≤阈值", true, [lowestHp()])]
-  if (["maim", "fracturing_impact", "puncture", "pestilent_shot", "steady_shot"].includes(t)) return [preset("target-hp", "目标敌人当前 HP≥阈值", true, [targetHp()])]
+    return [preset("hp-search", "所有敌人的当前HP ≥ 阈值", true, [enemyHp(2000, "search")]), preset("multi", "所有敌人的存活数 ≥ 2", true, [multi()])]
+  if (t === "quick_aid") return [preset("lowest-hp", "所有队友的最低HP% ≤ 阈值", true, [lowestHp()]), preset("missing-hp", "所有队友的缺失HP ≥ 阈值", false, [missingHp()])]
+  if (t === "rejuvenate") return [preset("missing-hp", "所有队友的缺失HP ≥ 阈值", true, [missingHp()]), preset("lowest-hp", "所有队友的最低HP% ≤ 阈值", true, [lowestHp()])]
+  if (["maim", "fracturing_impact", "puncture", "pestilent_shot", "steady_shot"].includes(t)) return [preset("target-hp", "目标敌人的当前HP ≥ 阈值", true, [targetHp()])]
   if (["crippling_slash", "cleave", "stunning_blow", "sweep", "penetrating_strike", "penetrating_shot", "rain_of_arrows", "shield_bash"].includes(t))
-    return [preset("hp-search", "敌方总 HP≥阈值", true, [enemyHp(2000, "search")])]
+    return [preset("hp-search", "所有敌人的当前HP ≥ 阈值", true, [enemyHp(2000, "search")])]
   if (["provoke", "spike_shell", "retribution"].includes(t)) return [preset("empty", "无条件", true, [])]
   if (t === "elusiveness") return [preset("empty", "无条件", true, []), preset("other-inactive", "坚韧未生效", false, [inactive("toughness")])]
   if (t === "toughness") return [preset("empty", "无条件", true, []), preset("other-inactive", "闪避未生效", false, [inactive("elusiveness")])]

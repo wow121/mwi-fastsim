@@ -31,15 +31,15 @@ function templates(m, hrid, info) {
   const out = []
   const coarse = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   if (d.hitpointRestore > 0) {
-    for (const v of grid(info.hp, coarse)) out.push({ family: "missing_hp", label: `缺血 ≥ ${v}`, triggers: [cond("self", "missing_hp", "greater_than_equal", v)], value: v })
-    for (const v of grid(info.hp, coarse)) out.push({ family: "current_hp", label: `当前血量 ≤ ${v}`, triggers: [cond("self", "current_hp", "less_than_equal", v)], value: v })
+    for (const v of grid(info.hp, coarse)) out.push({ family: "missing_hp", label: `缺失HP ≥ ${v}`, triggers: [cond("self", "missing_hp", "greater_than_equal", v)], value: v })
+    for (const v of grid(info.hp, coarse)) out.push({ family: "current_hp", label: `当前HP ≤ ${v}`, triggers: [cond("self", "current_hp", "less_than_equal", v)], value: v })
   }
   if (d.manapointRestore > 0)
-    for (const v of grid(info.mp, coarse)) out.push({ family: "missing_mp", label: `缺蓝 ≥ ${v}`, triggers: [cond("self", "missing_mp", "greater_than_equal", v)], value: v })
+    for (const v of grid(info.mp, coarse)) out.push({ family: "missing_mp", label: `缺失MP ≥ ${v}`, triggers: [cond("self", "missing_mp", "greater_than_equal", v)], value: v })
   if (!(d.hitpointRestore > 0) && !(d.manapointRestore > 0)) {
     out.push({ family: "in_combat", label: "有目标时（战斗中）", triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", 1)] })
-    for (const n of [2, 3, 4]) out.push({ family: "enemies", label: `敌人数 ≥ ${n}`, triggers: [cond("all_enemies", "number_of_active_units", "greater_than_equal", n)], value: n })
-    for (const v of [5000, 10000, 20000, 40000]) out.push({ family: "target_hp", label: `目标血量 ≥ ${v}`, triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", v)], value: v })
+    for (const n of [2, 3, 4]) out.push({ family: "enemies", label: `所有敌人的存活数 ≥ ${n}`, triggers: [cond("all_enemies", "number_of_active_units", "greater_than_equal", n)], value: n })
+    for (const v of [5000, 10000, 20000, 40000]) out.push({ family: "target_hp", label: `目标敌人的当前HP ≥ ${v}`, triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", v)], value: v })
   }
   return out
 }
