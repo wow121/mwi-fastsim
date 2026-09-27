@@ -6,7 +6,7 @@
 // is kept only if the final paired review confirms it.
 import { halving } from "./search.mjs"
 import { defaultTriggers, teamDTO, triggersFor } from "./model.mjs"
-import { paired, seedList } from "./evaluator.mjs"
+import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 import { playerStats } from "./game.mjs"
 
@@ -74,7 +74,7 @@ function conflicts(m, a, b) {
   return [...buffUniques(m, b)].some(u => ua.has(u))
 }
 
-/** params: { members, target, extra, objective, optimize, rounds, swapItems } */
+/** params: { members, target, extra, objective, optimize, rounds, swapItems, allowItems? (candidate items; default all) } */
 export async function optimizeConsumables(ev, params, api) {
   const { m } = ev.ctx
   const { target, extra, objective = "profit", rounds = 2, swapItems = true } = params
@@ -86,7 +86,8 @@ export async function optimizeConsumables(ev, params, api) {
   const infos = teamDTO(m, members).map(d => memberInfo(m, d))
   const pool = Object.fromEntries(KINDS.map(([k, cat]) => [k, Object.values(m.$e.itemDetailMap)
     .filter(i => i.categoryHrid === cat && i.consumableDetail?.cooldownDuration > 0 && i.consumableDetail?.usableInActionTypeMap?.["/action_types/combat"])
-    .map(i => i.hrid)]))
+    .map(i => i.hrid)
+    .filter(h => !params.allowItems || params.allowItems.includes(h))]))
   const finalSeeds = seedList(55511, 8)
   const baseline = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   api.log(`基准：${fmt(baseline.value, objective)}`)
@@ -188,6 +189,7 @@ export async function optimizeConsumables(ev, params, api) {
 }
 
 function fmt(v, objective) {
+  if (OBJECTIVE_FORMATS[objective]) return OBJECTIVE_FORMATS[objective](v)
   if (objective === "xp") return `${Math.round(v).toLocaleString()} 经验/小时`
   return `${(v * 24 / 1e6).toFixed(2)}M/天`
 }

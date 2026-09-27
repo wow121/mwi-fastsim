@@ -61,6 +61,8 @@ const menu = [
   ["/team", "队伍"], ["/simulate", "模拟"], ["/zones", "刷图推荐"], ["/skills", "技能与触发优化"],
   ["/consumables", "药水触发优化"], ["/upgrades", "整队提升规划"], ["/goal", "目标区域提升"], ["/gear-cost", "装备获取成本"], ["/queue", "批量队列"], ["/jobs", "任务"],
 ]
+// Ironcow (铁牛) mode lives apart from the market-based pages
+const ironMenu = [["/ironcow", "铁牛模式"]]
 </script>
 
 <template>
@@ -69,6 +71,9 @@ const menu = [
       <div style="padding: 16px 16px 8px; font-weight: 600">MWI 战斗工具</div>
       <el-menu :default-active="'/' + (route.path.split('/')[1] || 'team')" router style="border: none">
         <el-menu-item v-for="[p, t] in menu" :key="p" :index="p">{{ t }}</el-menu-item>
+        <el-menu-item-group title="铁牛">
+          <el-menu-item v-for="[p, t] in ironMenu" :key="p" :index="p">{{ t }}</el-menu-item>
+        </el-menu-item-group>
       </el-menu>
       <div class="muted" style="padding: 12px 16px; line-height: 1.8">
         <div v-if="store.engine">引擎：{{ engineLabel(store.engine) }} · {{ store.engine.threads }} 线程</div>

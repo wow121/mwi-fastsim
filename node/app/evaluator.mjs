@@ -23,6 +23,9 @@ function average(list) {
   return out
 }
 
+/** Log formatting of objective values that are not profit / xp (filled in by other modes, e.g. ironcow). */
+export const OBJECTIVE_FORMATS = {}
+
 export function objectiveValue(metrics, objective) {
   switch (objective) {
     case "xp": return metrics.xpPerHour

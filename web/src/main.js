@@ -17,6 +17,7 @@ const routes = [
   { path: "/goal", component: () => import("./pages/Goal.vue"), meta: { title: "目标区域提升" } },
   { path: "/upgrades", component: () => import("./pages/Upgrades.vue"), meta: { title: "整队提升规划" } },
   { path: "/gear-cost", component: () => import("./pages/GearCost.vue"), meta: { title: "装备获取成本" } },
+  { path: "/ironcow", component: () => import("./pages/Ironcow.vue"), meta: { title: "铁牛模式" } },
   { path: "/queue", component: () => import("./pages/Queue.vue"), meta: { title: "批量队列" } },
   { path: "/jobs/:id?", component: () => import("./pages/Jobs.vue"), meta: { title: "任务" } },
 ]

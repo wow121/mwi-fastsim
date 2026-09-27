@@ -94,7 +94,7 @@ function add(map, k, v) {
   map.set(k, num(map.get(k), 0) + n)
 }
 
-function dungeonInfo(maps, r) {
+export function dungeonInfo(maps, r) {
   const z = maps.actionDetailMap[String(r?.zoneName || "")]
   return z?.combatZoneInfo?.isDungeon === true ? z.combatZoneInfo.dungeonInfo : null
 }
@@ -181,19 +181,25 @@ function monsterDrops(maps, monster, deaths, r, pid, out) {
   table(mon.rareDropTable, true)
 }
 
-function activePlayer(r, id) {
+export function activePlayer(r, id) {
   const want = `player${String(id || "1").replace(/^player/, "")}`
   return PLAYERS.has(want) ? want : "player1"
+}
+
+/** Expected drops of one player over the run: { drops: Map(hrid -> amount), rewards: dungeon chests }. */
+export function playerDrops(maps, r, pid) {
+  const drops = new Map()
+  let rewards = []
+  if (r.isDungeon) rewards = dungeonRewards(maps, r, pid, drops)
+  else for (const [h, n] of Object.entries(r.deaths ?? {})) if (!PLAYERS.has(h)) monsterDrops(maps, h, n, r, pid, drops)
+  return { drops, rewards }
 }
 
 /** `o0`: revenue / expenses / profit over the whole run for one player. */
 export function profit(book, r, playerId, { dropMode = "bid", consumableMode = "ask" } = {}) {
   const maps = book.maps
   const pid = activePlayer(r, playerId)
-  const drops = new Map()
-  let rewards = []
-  if (r.isDungeon) rewards = dungeonRewards(maps, r, pid, drops)
-  else for (const [h, n] of Object.entries(r.deaths ?? {})) if (!PLAYERS.has(h)) monsterDrops(maps, h, n, r, pid, drops)
+  const { drops, rewards } = playerDrops(maps, r, pid)
   const costs = new Map()
   for (const [h, n] of Object.entries(r.consumablesUsed?.[pid] ?? {})) add(costs, h, n)
   if (r.isDungeon) dungeonKeyCosts(maps, r, rewards, costs)

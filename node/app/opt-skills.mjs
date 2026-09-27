@@ -3,7 +3,7 @@
 // presets per ability; thresholds of "search" presets tuned afterwards (coarse, then fine).
 // Coordinate descent over members; successive halving per member.
 import { halving, DEFAULT_STAGES } from "./search.mjs"
-import { paired, seedList } from "./evaluator.mjs"
+import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 import { groups, memberPool, presetVariants } from "./skill-pools.mjs"
 
@@ -138,6 +138,7 @@ export async function optimizeSkills(ev, params, api) {
 }
 
 function fmt(v, objective) {
+  if (OBJECTIVE_FORMATS[objective]) return OBJECTIVE_FORMATS[objective](v)
   if (objective === "xp") return `${Math.round(v).toLocaleString()} 经验/小时`
   return `${(v * 24 / 1e6).toFixed(2)}M/天`
 }

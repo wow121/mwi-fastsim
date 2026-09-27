@@ -11,8 +11,9 @@ import { adviseUpgrades } from "./opt-upgrades.mjs"
 import { planGoal } from "./opt-goal.mjs"
 import { recommendZones, runQueue } from "./opt-zones.mjs"
 import { gearCost } from "./gear-cost.mjs"
+import { IRONCOW_JOBS, ironcowRoutes } from "./ironcow/jobs.mjs"
 
-export { gearCost }
+export { gearCost, ironcowRoutes }
 
 export const JOB_TYPES = {
   skills: { title: "整队技能与触发优化", run: optimizeSkills },
@@ -21,6 +22,7 @@ export const JOB_TYPES = {
   goal: { title: "目标区域提升", run: planGoal },
   zones: { title: "刷图推荐", run: recommendZones },
   queue: { title: "批量队列", run: runQueue },
+  ...IRONCOW_JOBS,
 }
 
 export function targetOf(s = {}) {

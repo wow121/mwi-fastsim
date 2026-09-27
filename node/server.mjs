@@ -19,7 +19,7 @@ import { Jobs } from "./app/jobs.mjs"
 import { teamDTO } from "./app/model.mjs"
 import { options } from "./app/options.mjs"
 import { decodeGameData } from "./app/gamedata.mjs"
-import { gearCost, jobRoutes, selectedMembers, simulate, skillPools, teamFromGame, teamFromSite } from "./app/routes-core.mjs"
+import { gearCost, ironcowRoutes, jobRoutes, selectedMembers, simulate, skillPools, teamFromGame, teamFromSite } from "./app/routes-core.mjs"
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith("--") ? [...acc, [a.slice(2), all[i + 1]]] : acc), []))
 const PORT = Number(args.port || 8765)
@@ -221,6 +221,10 @@ async function api(req, url, body) {
   if (p === "/api/skill-pools" && req.method === "POST") return skillPools(st.m, body)
   if (p === "/api/simulate" && req.method === "POST") return simulate(st, body)
   if (p === "/api/gear-cost" && req.method === "POST") return gearCost(st.m, st.book, body)
+  if (p.startsWith("/api/ironcow/")) {
+    const r = ironcowRoutes(st, req.method, p, body)
+    if (r !== undefined) return r
+  }
   const jr = jobRoutes(jobs, st, req.method, p, body)
   if (jr !== undefined) return jr
   throw Object.assign(new Error("not found"), { status: 404 })
