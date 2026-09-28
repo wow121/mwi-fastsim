@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具 · 铁牛导入
 // @namespace    mwi-fastsim-ironcow
-// @version      0.1.0
+// @version      0.1.1
 // @description  游戏页面：读取当前铁牛角色（战斗配置 + 生活技能、工具装备、茶、房子、社区加成），导入到 MWI 战斗工具的「铁牛模式」，和普通队伍分开保存
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -139,18 +139,45 @@
         console.error("[fastsim-ironcow] init_character_data", e)
       }
     }
+    hookSocket(["init_character_data"], data => onMessage({ data }))
+    setTimeout(() => {
+      if (done) return
+      const o = characterFromStorage()
+      if (!o) return badge("没读到角色数据，刷新游戏页面试试", false)
+      done = true
+      onCharacter(o)
+    }, 15000)
+  }
+
+  // =====================================================================================
+  // WebSocket capture. Under Tampermonkey MV3 the script runs in an isolated world and
+  // unsafeWindow is a Proxy that silently drops writes, so patching WebSocket.prototype from
+  // here does nothing. Instead a hook is injected into the page's own world: it replaces the
+  // WebSocket constructor (every listener style goes through it, other scripts' hooks chain)
+  // and hands matching frames back with a DOM event. If the page refuses inline scripts, the
+  // old prototype patch is used.
+  // =====================================================================================
+  function hookSocket(keys, onText) {
+    const EVT = `fastsim-ws-${Math.random().toString(36).slice(2)}`
+    document.addEventListener(EVT, e => { if (typeof e.detail === "string") onText(e.detail) })
+    const s = document.createElement("script")
+    s.textContent = `(${pageSocketHook.toString()})(${JSON.stringify(EVT)}, ${JSON.stringify(keys)})`
+    ;(document.head || document.documentElement).appendChild(s)
+    s.remove()
+    if (document.documentElement.getAttribute("data-" + EVT) === "1") return
     const WS = W.WebSocket
     const origAdd = WS.prototype.addEventListener
     const origOn = Object.getOwnPropertyDescriptor(WS.prototype, "onmessage")
     const seen = new Set()
+    const listener = e => { if (typeof e.data === "string" && keys.some(k => e.data.includes(k))) onText(e.data) }
     function observe(socket) {
       if (seen.has(socket)) return
       seen.add(socket)
-      origAdd.call(socket, "message", onMessage)
+      origAdd.call(socket, "message", listener)
     }
-    WS.prototype.addEventListener = function (type, listener, options) {
+    WS.prototype.addEventListener = function (type, l, options) {
       if (type === "message") observe(this)
-      return origAdd.call(this, type, listener, options)
+      return origAdd.call(this, type, l, options)
     }
     if (origOn && origOn.configurable && origOn.get && origOn.set) {
       Object.defineProperty(WS.prototype, "onmessage", {
@@ -160,5 +187,39 @@
         enumerable: origOn.enumerable,
       })
     }
+  }
+
+  function pageSocketHook(EVT, KEYS) {
+    const Native = window.WebSocket
+    if (!Native) return
+    const forward = e => {
+      if (typeof e.data === "string" && KEYS.some(k => e.data.includes(k))) document.dispatchEvent(new CustomEvent(EVT, { detail: e.data }))
+    }
+    function WrappedWebSocket(...args) {
+      const ws = Reflect.construct(Native, args, new.target && new.target !== WrappedWebSocket ? new.target : Native)
+      try { ws.addEventListener("message", forward) } catch {}
+      return ws
+    }
+    WrappedWebSocket.prototype = Native.prototype
+    for (const k of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) Object.defineProperty(WrappedWebSocket, k, { value: Native[k], enumerable: true })
+    window.WebSocket = WrappedWebSocket
+    document.documentElement.setAttribute("data-" + EVT, "1")
+  }
+
+  // Last resort when no init_character_data frame was seen (e.g. the hook came too late):
+  // another script (MWITools etc.) may have stored it in localStorage.
+  function characterFromStorage() {
+    let ls = null
+    try { ls = window.localStorage } catch {}
+    if (!ls) return null
+    for (let i = 0; i < ls.length; i++) {
+      const v = ls.getItem(ls.key(i))
+      if (!v || !v.includes("characterSkills")) continue
+      try {
+        const o = JSON.parse(v)
+        if (o && typeof o === "object" && o.characterSkills && o.character) return o
+      } catch {}
+    }
+    return null
   }
 })()

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.2
+// @version      0.4.3
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -345,27 +345,13 @@
         }
       }
     }
-    const WS = W.WebSocket
-    const origAdd = WS.prototype.addEventListener
-    const origOn = Object.getOwnPropertyDescriptor(WS.prototype, "onmessage")
-    const seen = new Set()
-    function observe(socket) {
-      if (seen.has(socket)) return
-      seen.add(socket)
-      origAdd.call(socket, "message", onMessage)
-    }
-    WS.prototype.addEventListener = function (type, listener, options) {
-      if (type === "message") observe(this)
-      return origAdd.call(this, type, listener, options)
-    }
-    if (origOn && origOn.configurable && origOn.get && origOn.set) {
-      Object.defineProperty(WS.prototype, "onmessage", {
-        get() { return origOn.get.call(this) },
-        set(h) { observe(this); return origOn.set.call(this, h) },
-        configurable: true,
-        enumerable: origOn.enumerable,
-      })
-    }
+    hookSocket(["init_character_data", "profile_shared"], data => onMessage({ data }))
+    setTimeout(() => {
+      if (done) return
+      const o = characterFromStorage()
+      if (!o) return
+      onMessage({ data: JSON.stringify({ ...o, type: "init_character_data" }) })
+    }, 15000)
   }
 
   // =====================================================================================
@@ -513,5 +499,79 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addButtons)
     else addButtons()
     probe().then(up => console.info(`[fastsim] 本地加速${up ? "已连接" : "未启动，使用网站原版模拟"}`))
+  }
+
+  // =====================================================================================
+  // WebSocket capture. Under Tampermonkey MV3 the script runs in an isolated world and
+  // unsafeWindow is a Proxy that silently drops writes, so patching WebSocket.prototype from
+  // here does nothing. Instead a hook is injected into the page's own world: it replaces the
+  // WebSocket constructor (every listener style goes through it, other scripts' hooks chain)
+  // and hands matching frames back with a DOM event. If the page refuses inline scripts, the
+  // old prototype patch is used.
+  // =====================================================================================
+  function hookSocket(keys, onText) {
+    const EVT = `fastsim-ws-${Math.random().toString(36).slice(2)}`
+    document.addEventListener(EVT, e => { if (typeof e.detail === "string") onText(e.detail) })
+    const s = document.createElement("script")
+    s.textContent = `(${pageSocketHook.toString()})(${JSON.stringify(EVT)}, ${JSON.stringify(keys)})`
+    ;(document.head || document.documentElement).appendChild(s)
+    s.remove()
+    if (document.documentElement.getAttribute("data-" + EVT) === "1") return
+    const WS = W.WebSocket
+    const origAdd = WS.prototype.addEventListener
+    const origOn = Object.getOwnPropertyDescriptor(WS.prototype, "onmessage")
+    const seen = new Set()
+    const listener = e => { if (typeof e.data === "string" && keys.some(k => e.data.includes(k))) onText(e.data) }
+    function observe(socket) {
+      if (seen.has(socket)) return
+      seen.add(socket)
+      origAdd.call(socket, "message", listener)
+    }
+    WS.prototype.addEventListener = function (type, l, options) {
+      if (type === "message") observe(this)
+      return origAdd.call(this, type, l, options)
+    }
+    if (origOn && origOn.configurable && origOn.get && origOn.set) {
+      Object.defineProperty(WS.prototype, "onmessage", {
+        get() { return origOn.get.call(this) },
+        set(h) { observe(this); return origOn.set.call(this, h) },
+        configurable: true,
+        enumerable: origOn.enumerable,
+      })
+    }
+  }
+
+  function pageSocketHook(EVT, KEYS) {
+    const Native = window.WebSocket
+    if (!Native) return
+    const forward = e => {
+      if (typeof e.data === "string" && KEYS.some(k => e.data.includes(k))) document.dispatchEvent(new CustomEvent(EVT, { detail: e.data }))
+    }
+    function WrappedWebSocket(...args) {
+      const ws = Reflect.construct(Native, args, new.target && new.target !== WrappedWebSocket ? new.target : Native)
+      try { ws.addEventListener("message", forward) } catch {}
+      return ws
+    }
+    WrappedWebSocket.prototype = Native.prototype
+    for (const k of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) Object.defineProperty(WrappedWebSocket, k, { value: Native[k], enumerable: true })
+    window.WebSocket = WrappedWebSocket
+    document.documentElement.setAttribute("data-" + EVT, "1")
+  }
+
+  // Last resort when no init_character_data frame was seen (e.g. the hook came too late):
+  // another script (MWITools etc.) may have stored it in localStorage.
+  function characterFromStorage() {
+    let ls = null
+    try { ls = window.localStorage } catch {}
+    if (!ls) return null
+    for (let i = 0; i < ls.length; i++) {
+      const v = ls.getItem(ls.key(i))
+      if (!v || !v.includes("characterSkills")) continue
+      try {
+        const o = JSON.parse(v)
+        if (o && typeof o === "object" && o.characterSkills && o.character) return o
+      } catch {}
+    }
+    return null
   }
 })()
