@@ -111,7 +111,7 @@ try {
   await sleep(4000)
   out("server-mode page:", await text())
   // gear cost page: preset the form, click 计算
-  await ev(`localStorage.setItem("fastsim-gear-cost", JSON.stringify({ hrid: "/items/blooming_trident_refined", level: 14, tax: 5, hasHeld: true, heldHrid: "/items/blooming_trident", heldLevel: 12 }))`)
+  await ev(`localStorage.setItem("fastsim-gear-cost", JSON.stringify({ hrid: "/items/blooming_trident_refined", level: 14, tax: 4, hasHeld: true, heldHrid: "/items/blooming_trident", heldLevel: 12 }))`)
   await send("Page.navigate", { url: "http://127.0.0.1:8799/#/gear-cost" })
   await sleep(3000)
   await ev(`[...document.querySelectorAll("button")].find(b => b.textContent.includes("计算")).click()`)

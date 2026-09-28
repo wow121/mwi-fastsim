@@ -27,7 +27,7 @@ const hours = ref(12)
 const seeds = ref(8)
 const replacements = ref(true)
 const optimize = ref(members.value.map((_, i) => i))
-const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 5, maxLevelUp: 6, keepEnd: false, houses: true, guild: true, refinedUnrefine: false }))
+const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 4, maxLevelUp: 6, keepEnd: false, houses: true, guild: true, refinedUnrefine: false }))
 if (!plan.value.cash) plan.value.cash = {}
 if (!plan.value.other) plan.value.other = {}
 if (plan.value.houses == null) plan.value.houses = true

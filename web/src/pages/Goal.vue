@@ -26,7 +26,7 @@ watch(goal, v => save("fastsim-goal-target", v), { deep: true })
 const extra = ref(defaultExtra())
 // cash / other income / tax are shared with the upgrade planner page
 const plan = ref(load("fastsim-upgrade-plan", {}))
-for (const [k, d] of [["cash", {}], ["other", {}], ["tax", 5], ["buyPrice", "ask"], ["sellPrice", "bid"]]) if (plan.value[k] == null) plan.value[k] = d
+for (const [k, d] of [["cash", {}], ["other", {}], ["tax", 4], ["buyPrice", "ask"], ["sellPrice", "bid"]]) if (plan.value[k] == null) plan.value[k] = d
 watch(plan, v => save("fastsim-upgrade-plan", { ...load("fastsim-upgrade-plan", {}), cash: v.cash, other: v.other, tax: v.tax, buyPrice: v.buyPrice, sellPrice: v.sellPrice }), { deep: true })
 const opts = ref(load("fastsim-goal-opts", { maxDeaths: 0.01, maxLevelUp: 8, replacements: true, levels: true, consumables: true, guild: false, charms: true }))
 watch(opts, v => save("fastsim-goal-opts", v), { deep: true })

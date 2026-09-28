@@ -56,7 +56,7 @@ function mirrorUp(gp, h, from, to) {
 export function gearCost(game, rawBook, params) {
   const book = pricedBook(rawBook, params) // prices inside the tradable band only
   const maps = game.$e
-  const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
+  const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04
   const gp = new GearPrices(maps, book, tax, { refinedResale: params.refinedResale || "market" })
   const h = String(params.hrid || "")
   const n = Math.max(0, Math.floor(Number(params.level || 0)))

@@ -591,7 +591,7 @@ export async function adviseUpgrades(ev, params, api) {
   const budget = members.map((_, k) => Math.max(0, Number(params.budgets?.[k] || 0)))
   const otherIncome = members.map((_, k) => Number(params.otherIncomes?.[k] || 0))
   const horizons = (params.horizons?.length ? params.horizons : [30, 60]).map(Number).filter(d => d > 0).sort((a, b) => a - b)
-  const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
+  const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04
   const maps = ev.ctx.m.$e
   const gp = new GearPrices(maps, pricedBook(ev.ctx.book, params), tax, { refinedResale: params.refinedResale })
   const mode = ["income", "score"].includes(params.objective) ? params.objective : "wealth"

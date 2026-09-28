@@ -11,7 +11,7 @@ const load = (k, d) => {
     return d
   }
 }
-const form = ref(load("fastsim-gear-cost", { hrid: "", level: 10, tax: 5, hasHeld: false, heldHrid: "", heldLevel: 0 }))
+const form = ref(load("fastsim-gear-cost", { hrid: "", level: 10, tax: 4, hasHeld: false, heldHrid: "", heldLevel: 0 }))
 watch(form, v => {
   try {
     localStorage.setItem("fastsim-gear-cost", JSON.stringify(v))

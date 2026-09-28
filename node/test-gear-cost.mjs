@@ -10,7 +10,7 @@ try {
     try {
       r = await fetch(`http://127.0.0.1:${port}/api/gear-cost`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hrid: process.argv[2] || "/items/blooming_trident_refined", level: Number(process.argv[3] || 13), tax: 0.05, held: process.argv[4] ? { hrid: process.argv[4], level: Number(process.argv[5] || 0) } : null }),
+        body: JSON.stringify({ hrid: process.argv[2] || "/items/blooming_trident_refined", level: Number(process.argv[3] || 13), tax: 0.04, held: process.argv[4] ? { hrid: process.argv[4], level: Number(process.argv[5] || 0) } : null }),
       }).then(x => x.json())
       break
     } catch {}

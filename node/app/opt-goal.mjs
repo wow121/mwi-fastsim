@@ -29,7 +29,7 @@ export async function planGoal(ev, params, api) {
   const { extra, goal } = params
   let members = clone(params.members)
   const optimize = params.optimize?.length ? params.optimize : members.map((_, i) => i)
-  const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.05
+  const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04
   const maxDeaths = Math.max(0, Number(params.maxDeaths ?? 0.01))
   const maxSteps = params.maxSteps || 80
   const useLevels = params.levels !== false

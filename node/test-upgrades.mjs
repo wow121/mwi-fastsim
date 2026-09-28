@@ -25,7 +25,7 @@ try {
   const s = team.settings || {}
   const target = { kind: "zone", zoneHrid: (s.useDungeon ? s.dungeonHrid : s.zoneHrid) || o.zones[0].hrid, difficultyTier: Number(s.difficultyTier || 0) }
   const t0 = Date.now()
-  const { id } = await call("POST", "/api/jobs", { type: "upgrades", params: { members, target, extra: { mooPass: true, comExp: 20, comDrop: 20 }, hours: 12, seeds: 8, budgets: (process.argv[2] || "400,400,400").split(",").map(v => Number(v) * 1e6), horizons: [30, 60], tax: 0.05, keepEnd: process.argv[3] === "keep" } })
+  const { id } = await call("POST", "/api/jobs", { type: "upgrades", params: { members, target, extra: { mooPass: true, comExp: 20, comDrop: 20 }, hours: 12, seeds: 8, budgets: (process.argv[2] || "400,400,400").split(",").map(v => Number(v) * 1e6), horizons: [30, 60], tax: 0.04, keepEnd: process.argv[3] === "keep" } })
   let j
   do {
     await new Promise(r => setTimeout(r, 2000))

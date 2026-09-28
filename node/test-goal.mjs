@@ -30,7 +30,7 @@ try {
   const goal = { kind: "zone", zoneHrid: pick[0].hrid, difficultyTier: Number(process.argv[3] || 4) }
   const timeGrid = process.argv[5] ? process.argv[5].split(",").map(Number) : undefined
   const t0 = Date.now()
-  const { id } = await call("POST", "/api/jobs", { type: "goal", params: { members, goal, current: target, extra: { mooPass: true, comExp: 20, comDrop: 20 }, budgets: (process.argv[4] || "1000,1000,1000").split(",").map(v => Number(v) * 1e6), tax: 0.05, timeGrid, guild: process.env.GUILD === "1" } })
+  const { id } = await call("POST", "/api/jobs", { type: "goal", params: { members, goal, current: target, extra: { mooPass: true, comExp: 20, comDrop: 20 }, budgets: (process.argv[4] || "1000,1000,1000").split(",").map(v => Number(v) * 1e6), tax: 0.04, timeGrid, guild: process.env.GUILD === "1" } })
   let j
   do {
     await new Promise(r => setTimeout(r, 3000))
