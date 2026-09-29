@@ -23,8 +23,8 @@ const save = (k, v) => {
 const members = computed(() => selectedMembers())
 const target = ref(defaultTarget())
 const extra = ref(defaultExtra())
-const hours = ref(12)
-const seeds = ref(8)
+const hours = ref(24)
+const seeds = ref(16)
 const replacements = ref(true)
 const optimize = ref(members.value.map((_, i) => i))
 const plan = ref(load("fastsim-upgrade-plan", { cash: {}, other: {}, horizons: [30, 60], tax: 4, maxLevelUp: 6, keepEnd: false, houses: true, guild: true, refinedUnrefine: false }))
@@ -76,7 +76,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
     <el-card>
       <p class="muted" style="margin-top: 0">
         先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级、房子 +1～+3 级）逐个模拟，得到每项每天多赚多少；
-        队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 60 项）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字；
+        队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 60 项，外加最好那级下面的几个中间级，比如 +14 下面的 +11～+13）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字；
         再按你的现金和每天收入排出购买顺序：钱够了就买。目标可选：总资产优先（期末现金 + 身上装备、技能等级、房子等级按卖出价扣税估的价值最高）、日利润优先（期末日利润最高，花的钱要在规定天数内赚回）、战斗评分优先（期末战斗评分涨得最多）。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
         买入默认按市场最低卖价（直接买），卖出默认按最高买价（直接卖）并扣卖出税，可以改成挂单价（挂买单买、挂卖单卖，价格更好但要等成交）；过渡装备以后卖掉时的差价和税都算在损耗里。

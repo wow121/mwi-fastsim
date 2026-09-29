@@ -586,8 +586,8 @@ export async function adviseUpgrades(ev, params, api) {
   const { target, extra } = params
   const members = clone(params.members)
   const optimize = params.optimize?.length ? params.optimize : members.map((_, i) => i)
-  const hours = params.hours || 12
-  const seeds = seedList(77777, params.seeds || 8)
+  const hours = params.hours || 24
+  const seeds = seedList(77777, params.seeds || 16)
   const budget = members.map((_, k) => Math.max(0, Number(params.budgets?.[k] || 0)))
   const otherIncome = members.map((_, k) => Number(params.otherIncomes?.[k] || 0))
   const horizons = (params.horizons?.length ? params.horizons : [30, 60]).map(Number).filter(d => d > 0).sort((a, b) => a - b)
@@ -649,13 +649,26 @@ export async function adviseUpgrades(ev, params, api) {
     .sort((a, b) => screenNet(b.s, b.j) - screenNet(a.s, a.j))
   // the best state of every slot first, then the other states, in order of the screening estimate
   const firsts = hopeful.filter((x, k) => hopeful.findIndex(y => y.s === x.s) === k)
-  const picks = [...firsts, ...hopeful.filter(x => !firsts.includes(x))].slice(0, refineTop)
+  const top = [...firsts, ...hopeful.filter(x => !firsts.includes(x))].slice(0, refineTop)
+  // the steps below a slot's best state (+11..+13 under a +14, house 4-5 under 6): a plan that can't
+  // afford the best yet may take one of them first, and left at the screening number (not planned)
+  // it would never be taken. Same item and family, the few levels just below, outside the cap.
+  const lvl = st => st.n ?? st.level
+  const below = firsts.filter(x => top.includes(x)).flatMap(({ s, j }) => {
+    const sl = slots[s]
+    const b = sl.states[j]
+    const from = sl.states[0].fam === b.fam ? lvl(sl.states[0]) : -1
+    return jobs.filter(y => y.s === s && y.j !== j && !top.includes(y) && y.st.h === b.h && y.st.fam === b.fam &&
+      lvl(y.st) > from && lvl(y.st) < lvl(b) && pay[s][0][y.j].cost < INF)
+      .sort((p, q) => lvl(q.st) - lvl(p.st)).slice(0, 4)
+  })
+  const picks = [...top, ...below]
   const refined = slots.map(sl => sl.states.map(() => false))
   const planDp = slots.map(sl => sl.states.map(() => 0))
   const planDpv = slots.map(sl => sl.states.map(() => members.map(() => 0)))
   let refBase = baseline
   if (picks.length) {
-    api.log(`初筛有 ${hopeful.length} 个可能划算的提升，复核${hopeful.length > picks.length ? `最有希望的 ${picks.length} 个` : "全部"}（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
+    api.log(`初筛有 ${hopeful.length} 个可能划算的提升，复核${hopeful.length > top.length ? `最有希望的 ${top.length} 个` : "全部"}${below.length ? `，另加它们下面的 ${below.length} 个中间级` : ""}（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
     refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
     done = 0
     const again = await pool(picks, 32, async ({ s, j, st }) => {
