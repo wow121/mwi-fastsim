@@ -56,7 +56,7 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
       <p class="muted" style="margin-top: 0">
         和迷宫胜率计算器的算法一样：每个迷宫怪用游戏里给它设的配装（装备按“最高强化 / 精确强化”的设置取），不带食物饮料，补给箱、迷宫升级生效；
         游戏自动挑战时房间等级 = 有效等级（战斗等级 + 补给箱等级加成）+ 设置 − 1，结果按这个“设置”给出（+N / −N）。
-        推荐设置 = 通关率（120 秒内打死，按整数百分比）不低于阈值的最高设置。再从背包里逐格换装备、换技能组合，看能把设置推高多少，最后列出单买一件装备的提升和花费。
+        推荐设置 = 通关率（120 秒内打死，按整数百分比）不低于阈值的最高设置。再从背包里逐格换装备；技能先按武器职业试所有组合，再用学过的全部技能（含特殊技能）逐格替换；最后列出单买一件装备或技能书升 5 / 10 / 20 级的提升和花费。
         需要油猴脚本 0.4.6 以上，在游戏页面打开过一次后自动同步。
       </p>
       <div class="row" style="margin-bottom: 8px">
@@ -89,7 +89,7 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
         </el-select>
       </div>
       <div class="row" style="margin-bottom: 12px">
-        <el-checkbox v-model="buy">也推荐可买的装备</el-checkbox>
+        <el-checkbox v-model="buy">也推荐可买的装备和技能书</el-checkbox>
         <template v-if="buy"><span class="muted">单件最多花</span><el-input-number v-model="maxSpend" :min="0" :step="100" size="small" style="width: 130px" /><span class="muted">M（0 = 不限）</span></template>
       </div>
       <JobRunner name="labyrinth" type="labyrinth" :params="params" label="开始推荐" @result="r => (result = r)" />
@@ -114,7 +114,7 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
         <el-table-column label="现在配装推荐" width="170">
           <template #default="{ row }"><b>{{ signed(row.current.setting) }}</b> <span class="muted">{{ row.current.level }} 级 · 第 {{ floorOf(row.current.level) }} 层</span></template>
         </el-table-column>
-        <el-table-column label="换装后推荐" width="190">
+        <el-table-column label="换装换技能后" width="190">
           <template #default="{ row }">
             <b :class="row.best.setting > row.current.setting ? 'good' : ''">{{ signed(row.best.setting) }}</b>
             <span v-if="row.best.setting > row.current.setting" class="good">（多 {{ row.best.setting - row.current.setting }} 级）</span>
@@ -122,9 +122,9 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
           </template>
         </el-table-column>
         <el-table-column label="平均击杀" width="90"><template #default="{ row }">{{ sec(row.best.avgClear) }}</template></el-table-column>
-        <el-table-column label="单买一件最多到">
+        <el-table-column label="单买一样最多到">
           <template #default="{ row }">
-            <template v-if="row.bestBuy">{{ signed(row.bestBuy.setting) }}：{{ row.bestBuy.name }} +{{ row.bestBuy.enhancementLevel }}（{{ money(row.bestBuy.cost) }}）</template>
+            <template v-if="row.bestBuy">{{ signed(row.bestBuy.setting) }}：{{ row.bestBuy.label }}（{{ money(row.bestBuy.cost) }}）</template>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
@@ -157,16 +157,16 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
           </div>
         </div>
         <template v-if="r.purchases?.length">
-          <div class="muted" style="margin: 12px 0 4px">单买一件（在换装后的配置上替换，各件分别比较，不叠加）</div>
+          <div class="muted" style="margin: 12px 0 4px">单买一样（装备或技能书，在换装换技能后的配置上替换，各样分别比较，不叠加）</div>
           <el-table :data="r.purchases" size="small">
             <el-table-column label="格子" prop="slotName" width="70" />
-            <el-table-column label="装备"><template #default="{ row }">{{ row.name }} +{{ row.enhancementLevel }}</template></el-table-column>
+            <el-table-column label="买什么"><template #default="{ row }">{{ row.label }}</template></el-table-column>
             <el-table-column label="花费" width="110" align="right"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
             <el-table-column label="怎么买" prop="how" />
             <el-table-column label="推荐设置" width="140" align="right"><template #default="{ row }">{{ signed(row.setting) }}（多 {{ row.gain }} 级）</template></el-table-column>
           </el-table>
         </template>
-        <div v-else-if="buy" class="muted" style="margin-top: 8px">没有找到单买一件就能提高设置的装备</div>
+        <div v-else-if="buy" class="muted" style="margin-top: 8px">没有找到单买一样就能提高设置的装备或技能书</div>
       </el-collapse-item>
     </el-collapse>
   </div>
