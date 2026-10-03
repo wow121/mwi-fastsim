@@ -13,7 +13,7 @@
 // screened by their success rate a little above the current best level, and only the best few
 // get the exact search.
 import { compilePayload } from "./engine-core.mjs"
-import { buildPayload, EQUIPMENT_SLOTS } from "./model.mjs"
+import { buildPayload, combatLevel as combatLevelOf, EQUIPMENT_SLOTS } from "./model.mjs"
 import { seedList } from "./evaluator.mjs"
 import { pool } from "./search.mjs"
 import { groups, memberPool, presetVariants } from "./skill-pools.mjs"
@@ -315,9 +315,9 @@ export async function optimizeLabyrinth(ev, params, api) {
   const maps = lab.maps
   const all = Object.values(maps.combatMonsterDetailMap).filter(x => x.isLabyrinthMonster).map(x => x.hrid)
   const monsters = params.monsters?.length ? params.monsters.filter(h => all.includes(h)) : all
-  const combatLevel = Number(game?.combatLevel) || 0
+  const combatLevel = Number(params.combatLevel) || Number(game?.combatLevel) || Math.floor(combatLevelOf(member.levels || {}))
   const effective = Math.floor(combatLevel + crateLevelBonus(maps, crates))
-  if (!game) api.log("没有读到迷宫设置（请更新油猴脚本到 0.4.5 后在游戏里重新同步），按当前身上的配装、战斗等级 0 算")
+  if (!game) api.log("没有读到迷宫设置（请更新油猴脚本到 0.4.6 后在游戏里重新同步），按当前身上的配装算")
   if (!member.ownedEquipment) api.log("没有读到背包，只在配装里的装备中选")
   api.log(`${member.name || "角色"}：战斗等级 ${combatLevel}，补给箱 ${crates.map(h => zh(maps, h)).join("、") || "无"}，有效等级 ${effective}；通关率阈值 ${(lab.threshold * 100).toFixed(0)}%`)
   const lu = member.labyrinthUpgrades

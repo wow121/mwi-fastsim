@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.5
+// @version      0.4.6
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -257,7 +257,9 @@
       const combat = entriesOf(s.characterSkillMap).find(([k]) => k === "/skills/combat")
       const lab = s.characterLabyrinth || {}
       return {
-        combatLevel: Number(combat && combat[1] && combat[1].level) || null,
+        // same order as the labyrinth calculator
+        combatLevel: Number(combat && combat[1] && combat[1].level) || Number(s.combatUnit && s.combatUnit.combatDetails && s.combatUnit.combatDetails.combatLevel) ||
+          Number(s.combatUnit && s.combatUnit.combatLevel) || Number(s.character && s.character.combatLevel) || null,
         setting,
         loadouts,
         crates: { tea: String(lab.teaCrateItemHrid || ""), coffee: String(lab.coffeeCrateItemHrid || ""), food: String(lab.foodCrateItemHrid || "") },

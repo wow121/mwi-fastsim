@@ -1,7 +1,7 @@
 // Game data -> player configs. Port of the combat-sim site's import path (CombatHeader `hu`, `q0`
 // current character, `U0` shared profile, `qr` normalization) applied to the envelope our
 // userscript builds on the game page (same shape as the site's data bridge: members[]).
-import { normalizeConditions } from "./model.mjs"
+import { combatLevel as combatLevelOf, normalizeConditions } from "./model.mjs"
 
 const LEVEL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
 const SLOT_KEYS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket"]
@@ -232,7 +232,7 @@ function parseWearable(v) {
  * (equipment with the highest owned enhancement unless the loadout uses exact levels, abilities,
  * triggers) and the level setting; the combat level and the selected combat crates.
  */
-function labyrinthFromState(m, st, owned, levels, globalTriggers, skills) {
+function labyrinthFromState(m, st, owned, levels, globalTriggers, e, skillLevels) {
   const maps = m.$e
   if (!st || typeof st !== "object") return undefined
   const maxEnh = new Map()
@@ -280,8 +280,11 @@ function labyrinthFromState(m, st, owned, levels, globalTriggers, skills) {
   const tea = pick(c.tea, setting.labyrinthTeaCrateHrid)
   const crates = [coffee, food].filter(Boolean)
   if (!crates.length && /coffee_crate|food_crate/.test(tea)) crates.push(tea)
+  // the game's combat level; the formula from the skill levels as the last resort
   let combatLevel = Number(st.combatLevel) || 0
-  if (!combatLevel) for (const f of list(skills)) if (f?.skillHrid === "/skills/combat") combatLevel = Number(f.level) || 0
+  if (!combatLevel) for (const f of list(e?.characterSkills)) if (f?.skillHrid === "/skills/combat") combatLevel = Number(f.level) || 0
+  if (!combatLevel) combatLevel = Number(e?.combatUnit?.combatDetails?.combatLevel) || Number(e?.combatUnit?.combatLevel) || Number(e?.character?.combatLevel) || 0
+  if (!combatLevel) combatLevel = Math.floor(combatLevelOf(skillLevels))
   return { combatLevel, crates: crates.filter(h => maps.labyrinthCrateDetailMap?.[h]), monsters, capturedAt: Date.now() }
 }
 
@@ -444,7 +447,7 @@ function fromCurrentCharacter(m, e, base) {
   const lu = labyrinthUpgrades(e?.characterInfo)
   if (lu !== undefined) p.labyrinthUpgrades = lu
   if (has(e, "characterItems")) p.ownedEquipment = ownedEquipment(maps, e.characterItems)
-  const lab = labyrinthFromState(m, e?.labyrinthState, p.ownedEquipment, p.abilityLevelMap, p.triggerMap, e?.characterSkills)
+  const lab = labyrinthFromState(m, e?.labyrinthState, p.ownedEquipment, p.abilityLevelMap, p.triggerMap, e, p.levels)
   if (lab) p.labyrinth = lab
   return normalizePlayer(m, p, base)
 }

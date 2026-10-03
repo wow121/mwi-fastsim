@@ -11,6 +11,14 @@ const members = computed(() => store.team.members || [])
 const memberId = ref(String((members.value.find(m => m.labyrinth) || members.value.find(m => m.ownedEquipment) || members.value[0])?.id ?? ""))
 const member = computed(() => members.value.find(m => String(m.id) === memberId.value))
 const upgrades = ref({})
+const combatLevel = ref(0)
+// combat level as the game shows it: 0.1 (sta + int + att + def + best style) + 0.5 best of att/def/styles
+const formulaLevel = m => {
+  const l = m?.levels || {}
+  const v = k => Number(l[k] || 1)
+  return Math.floor(0.1 * (v("stamina") + v("intelligence") + v("attack") + v("defense") + Math.max(v("melee"), v("ranged"), v("magic"))) + 0.5 * Math.max(v("attack"), v("defense"), v("melee"), v("ranged"), v("magic")))
+}
+watch(() => memberId.value, () => (combatLevel.value = Number(member.value?.labyrinth?.combatLevel) || formulaLevel(member.value)), { immediate: true })
 watch(member, m => (upgrades.value = { attackSpeed: 0, castSpeed: 0, combatDamage: 0, criticalRate: 0, ...(m?.labyrinthUpgrades || {}) }), { immediate: true })
 const threshold = ref(95)
 const monsters = ref([])
@@ -25,9 +33,10 @@ function params() {
   if (!member.value) return ElMessage.warning("队伍里还没有角色，先在游戏里用油猴脚本同步")
   const m = clone(member.value)
   m.labyrinthUpgrades = { ...(m.labyrinthUpgrades || {}), ...upgrades.value }
-  return { member: m, monsters: monsters.value, crates: customCrates.value ? crates.value : undefined, threshold: threshold.value / 100, buy: buy.value, maxSpend: maxSpend.value * 1e6 }
+  return { member: m, combatLevel: combatLevel.value, monsters: monsters.value, crates: customCrates.value ? crates.value : undefined, threshold: threshold.value / 100, buy: buy.value, maxSpend: maxSpend.value * 1e6 }
 }
 
+const floorOf = level => Math.floor(level / 20)
 const signed = n => (n == null ? "未设" : n > 0 ? `+${n}` : String(n))
 const sec = v => (v == null ? "—" : `${v.toFixed(1)} 秒`)
 const crateNames = hs => (hs || []).map(h => store.options?.labyrinthCrates?.find(c => c.hrid === h)?.name || h.split("/").pop()).join("、") || "无"
@@ -48,7 +57,7 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
         和迷宫胜率计算器的算法一样：每个迷宫怪用游戏里给它设的配装（装备按“最高强化 / 精确强化”的设置取），不带食物饮料，补给箱、迷宫升级生效；
         游戏自动挑战时房间等级 = 有效等级（战斗等级 + 补给箱等级加成）+ 设置 − 1，结果按这个“设置”给出（+N / −N）。
         推荐设置 = 通关率（120 秒内打死，按整数百分比）不低于阈值的最高设置。再从背包里逐格换装备、换技能组合，看能把设置推高多少，最后列出单买一件装备的提升和花费。
-        需要油猴脚本 0.4.5 以上，在游戏页面打开过一次后自动同步。
+        需要油猴脚本 0.4.6 以上，在游戏页面打开过一次后自动同步。
       </p>
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">角色</span>
@@ -57,10 +66,10 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
         </el-select>
         <span class="muted">通关率阈值</span>
         <el-input-number v-model="threshold" :min="50" :max="99" size="small" style="width: 100px" /><span class="muted">%</span>
-        <template v-if="member?.labyrinth">
-          <span class="muted">战斗等级 {{ member.labyrinth.combatLevel }} · 游戏里选的补给箱：{{ crateNames(member.labyrinth.crates) }}</span>
-        </template>
-        <span v-else class="bad">没读到迷宫设置：更新油猴脚本到 0.4.5，打开游戏页面重新同步</span>
+        <span class="muted">战斗等级</span>
+        <el-input-number v-model="combatLevel" :min="1" :max="300" size="small" style="width: 100px" />
+        <span v-if="member?.labyrinth" class="muted">游戏里选的补给箱：{{ crateNames(member.labyrinth.crates) }}</span>
+        <span v-else class="bad">没读到迷宫设置：更新油猴脚本到 0.4.6，打开游戏页面重新同步</span>
       </div>
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">迷宫升级</span>
@@ -96,16 +105,20 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
       <el-table :data="rows" size="small">
         <el-table-column label="迷宫怪" prop="name" width="110" />
         <el-table-column label="配装" width="140"><template #default="{ row }">{{ row.loadoutName || "—" }}</template></el-table-column>
-        <el-table-column label="现在的设置" width="150">
-          <template #default="{ row }">{{ signed(row.gameSetting) }}<span v-if="row.gameSettingP != null" class="muted">（通关率 {{ pct(row.gameSettingP) }}）</span></template>
+        <el-table-column label="现在的设置" width="190">
+          <template #default="{ row }">
+            {{ signed(row.gameSetting) }}
+            <span v-if="row.gameSettingP != null" class="muted">{{ result.effective + row.gameSetting - 1 }} 级 · 通关率 {{ pct(row.gameSettingP) }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="现在配装推荐" width="120">
-          <template #default="{ row }"><b>{{ signed(row.current.setting) }}</b> <span class="muted">{{ row.current.level }} 级</span></template>
+        <el-table-column label="现在配装推荐" width="170">
+          <template #default="{ row }"><b>{{ signed(row.current.setting) }}</b> <span class="muted">{{ row.current.level }} 级 · 第 {{ floorOf(row.current.level) }} 层</span></template>
         </el-table-column>
-        <el-table-column label="换装后推荐" width="150">
+        <el-table-column label="换装后推荐" width="190">
           <template #default="{ row }">
             <b :class="row.best.setting > row.current.setting ? 'good' : ''">{{ signed(row.best.setting) }}</b>
             <span v-if="row.best.setting > row.current.setting" class="good">（多 {{ row.best.setting - row.current.setting }} 级）</span>
+            <span class="muted"> 第 {{ floorOf(row.best.level) }} 层</span>
           </template>
         </el-table-column>
         <el-table-column label="平均击杀" width="90"><template #default="{ row }">{{ sec(row.best.avgClear) }}</template></el-table-column>
