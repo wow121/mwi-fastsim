@@ -17,7 +17,7 @@ const GRID = {
 }
 
 /** Member config with `group` in slots 1..4 (special slot untouched) and the chosen presets. */
-function applyGroup(members, idx, group, variant, levels) {
+export function applyGroup(members, idx, group, variant, levels) {
   const next = clone(members)
   const c = next[idx]
   c.abilities = [c.abilities?.[0] || { abilityHrid: "", level: 1 }]

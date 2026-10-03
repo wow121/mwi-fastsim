@@ -30,6 +30,7 @@ export function options(m, book) {
     zones: actions.filter(a => !a.combatZoneInfo.isDungeon && Number(a.combatZoneInfo.fightInfo?.randomSpawnInfo?.maxSpawnCount || 0) > 1).map(zone).sort(bySort),
     dungeons: actions.filter(a => a.combatZoneInfo.isDungeon).map(zone).sort(bySort),
     labyrinths: Object.values(maps.combatMonsterDetailMap).filter(x => x.isLabyrinthMonster).map(x => ({ hrid: x.hrid, name: n(x.hrid) })),
+    labyrinthCrates: Object.keys(maps.labyrinthCrateDetailMap || {}).map(h => ({ hrid: h, name: n(h) })),
     trigger: {
       dependencies: Object.values(maps.combatTriggerDependencyDetailMap).sort(bySort).map(d => ({ hrid: d.hrid, name: n(d.hrid), single: !!d.isSingleTarget })),
       conditions: Object.values(maps.combatTriggerConditionDetailMap).sort(bySort).map(c => ({ hrid: c.hrid, name: n(c.hrid), single: !!c.isSingleTarget, multi: !!c.isMultiTarget, comparators: c.allowedComparatorHrids || [] })),

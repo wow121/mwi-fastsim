@@ -105,6 +105,7 @@ export function playerDTO(m, cfg, index) {
     houseRooms: clone(cfg.houseRooms ?? {}),
     guildBuffs: clone(cfg.guildBuffs ?? {}),
     achievements: clone(cfg.achievements ?? {}),
+    labyrinthUpgrades: clone(cfg.labyrinthUpgrades ?? {}),
     debuffOnLevelGap: 0,
   }
   const slots = consumableSlots(m, dto)

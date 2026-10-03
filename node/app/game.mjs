@@ -309,6 +309,26 @@ export function labyrinthBuffs(game, crates = []) {
 }
 
 const NO_TIME = "0001-01-01T00:00:00Z"
+
+// Labyrinth upgrades (shop in the labyrinth), +1% per level, max 12. Not in the client data;
+// values from the old combat simulator's labyrinthUpgradeDetailMap.
+const LABYRINTH_UPGRADES = {
+  attackSpeed: { uniqueHrid: "/buff_uniques/labyrinth_upgrade_attack_speed", typeHrid: "/buff_types/attack_speed", ratio: true },
+  castSpeed: { uniqueHrid: "/buff_uniques/labyrinth_upgrade_cast_speed", typeHrid: "/buff_types/cast_speed" },
+  combatDamage: { uniqueHrid: "/buff_uniques/labyrinth_upgrade_combat_damage", typeHrid: "/buff_types/damage", ratio: true },
+  criticalRate: { uniqueHrid: "/buff_uniques/labyrinth_upgrade_critical_rate", typeHrid: "/buff_types/critical_rate" },
+  experience: { uniqueHrid: "/buff_uniques/labyrinth_upgrade_experience", typeHrid: "/buff_types/wisdom" },
+}
+
+/** Permanent buffs of one player's labyrinth upgrades ({ attackSpeed: level, ... }). */
+export function labyrinthUpgradeBuffs(levels = {}) {
+  const out = []
+  for (const [k, u] of Object.entries(LABYRINTH_UPGRADES)) {
+    const v = Math.min(12, Math.max(0, Math.floor(Number(levels?.[k]) || 0))) * 0.01
+    if (v > 0) out.push({ uniqueHrid: u.uniqueHrid, typeHrid: u.typeHrid, ratioBoost: u.ratio ? v : 0, flatBoost: u.ratio ? 0 : v, duration: 0 })
+  }
+  return out
+}
 const MOO_PASS = Object.freeze({
   uniqueHrid: "/buff_uniques/experience_moo_pass_buff", typeHrid: "/buff_types/wisdom", ratioBoost: 0, ratioBoostLevelBonus: 0,
   flatBoost: 0.05, flatBoostLevelBonus: 0, startTime: NO_TIME, duration: 0,

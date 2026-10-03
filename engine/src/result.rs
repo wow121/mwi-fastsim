@@ -56,6 +56,9 @@ pub struct SimResult {
     pub dungeons_completed: f64,
     pub dungeons_failed: f64,
     pub dungeon_attempts_started: f64,
+    /// labyrinth rooms that ended (kill, wipe or timeout) and the summed time of the kills
+    pub labyrinth_attempts: f64,
+    pub labyrinth_clear_time: f64,
     pub max_wave_reached: f64,
     pub number_of_players: f64,
     pub max_enrage_stack: f64,
@@ -108,6 +111,8 @@ impl SimResult {
             dungeons_completed: 0.0,
             dungeons_failed: 0.0,
             dungeon_attempts_started: 0.0,
+            labyrinth_attempts: 0.0,
+            labyrinth_clear_time: 0.0,
             max_wave_reached: 0.0,
             number_of_players: n_players as f64,
             max_enrage_stack: 0.0,
@@ -349,6 +354,10 @@ impl SimResult {
         }
         o.insert("isDungeon".into(), json!(self.is_dungeon));
         o.insert("isLabyrinth".into(), json!(self.is_labyrinth));
+        if self.is_labyrinth {
+            o.insert("labyrinthAttempts".into(), n(self.labyrinth_attempts));
+            o.insert("labyrinthClearTime".into(), n(self.labyrinth_clear_time));
+        }
         o.insert("dungeonsCompleted".into(), n(self.dungeons_completed));
         o.insert("dungeonsFailed".into(), n(self.dungeons_failed));
         o.insert("dungeonAttemptsStarted".into(), n(self.dungeon_attempts_started));

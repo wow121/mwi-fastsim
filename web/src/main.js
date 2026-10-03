@@ -18,6 +18,7 @@ const routes = [
   { path: "/upgrades", component: () => import("./pages/Upgrades.vue"), meta: { title: "整队提升规划" } },
   { path: "/gear-cost", component: () => import("./pages/GearCost.vue"), meta: { title: "装备获取成本" } },
   { path: "/ironcow", component: () => import("./pages/Ironcow.vue"), meta: { title: "铁牛模式" } },
+  { path: "/labyrinth", component: () => import("./pages/Labyrinth.vue"), meta: { title: "迷宫配置推荐" } },
   { path: "/queue", component: () => import("./pages/Queue.vue"), meta: { title: "批量队列" } },
   { path: "/jobs/:id?", component: () => import("./pages/Jobs.vue"), meta: { title: "任务" } },
 ]

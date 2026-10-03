@@ -192,6 +192,40 @@ function equipmentFromItems(maps, items) {
   return out
 }
 
+/** Every equipment item the character owns (worn or in the inventory), merged by hrid + level. */
+function ownedEquipment(maps, items) {
+  const out = new Map()
+  for (const n of list(items)) {
+    const i = n?.currentItem && typeof n.currentItem === "object" ? n.currentItem : n?.item && typeof n.item === "object" ? n.item : n
+    const hrid = String(i?.itemHrid || i?.hrid || "").trim()
+    if (maps.itemDetailMap?.[hrid]?.categoryHrid !== "/item_categories/equipment") continue
+    const lvl = nonNeg(i?.enhancementLevel ?? n?.enhancementLevel)
+    const k = `${hrid}#${lvl}`
+    const c = out.get(k) || { itemHrid: hrid, enhancementLevel: lvl, count: 0 }
+    c.count += Math.max(1, nonNeg(i?.count ?? n?.count ?? 1))
+    out.set(k, c)
+  }
+  return [...out.values()]
+}
+
+/** characterInfo.labyrinth*Level -> { attackSpeed, castSpeed, combatDamage, criticalRate, experience }. */
+export const LABYRINTH_UPGRADE_KEYS = ["attackSpeed", "castSpeed", "combatDamage", "criticalRate", "experience"]
+function labyrinthUpgrades(info) {
+  if (!info || typeof info !== "object") return undefined
+  const out = {}
+  for (const k of LABYRINTH_UPGRADE_KEYS) {
+    const v = info[`labyrinth${k[0].toUpperCase()}${k.slice(1)}Level`]
+    if (v != null && Number.isFinite(Number(v))) out[k] = nonNeg(v)
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function normalizeLabyrinthUpgrades(v) {
+  const out = {}
+  for (const k of LABYRINTH_UPGRADE_KEYS) out[k] = Math.min(12, nonNeg(v?.[k]))
+  return out
+}
+
 /** `O0` / `H0` */
 function triggerMapOf(m, e) {
   const out = {}
@@ -306,6 +340,10 @@ function normalizePlayer(m, e, base) {
   if (caps && typeof caps === "object") a.guildBuffCaps = normalizeGuildBuffs(maps, caps)
   else delete a.guildBuffCaps
   a.achievements = has(i, "achievements") ? (i.achievements && typeof i.achievements === "object" ? clone(i.achievements) : {}) : clone(n.achievements ?? {})
+  const lu = i.labyrinthUpgrades ?? n.labyrinthUpgrades
+  if (lu && typeof lu === "object") a.labyrinthUpgrades = normalizeLabyrinthUpgrades(lu)
+  const owned = i.ownedEquipment ?? n.ownedEquipment
+  if (Array.isArray(owned)) a.ownedEquipment = clone(owned)
   return a
 }
 
@@ -336,6 +374,9 @@ function fromCurrentCharacter(m, e, base) {
   if (g !== undefined) p.guildBuffs = g
   const gc = guildBuffCaps(maps, e)
   if (gc !== undefined) p.guildBuffCaps = gc
+  const lu = labyrinthUpgrades(e?.characterInfo)
+  if (lu !== undefined) p.labyrinthUpgrades = lu
+  if (has(e, "characterItems")) p.ownedEquipment = ownedEquipment(maps, e.characterItems)
   return normalizePlayer(m, p, base)
 }
 

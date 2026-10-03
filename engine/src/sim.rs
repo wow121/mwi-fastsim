@@ -1213,6 +1213,7 @@ impl<'a> Sim<'a> {
             }
         }
         let mut e = false;
+        let wins_before = self.res.encounters;
         let t = !self.players.iter().any(|&o| self.units[o].d.hp > 0.0);
         let is_dungeon = self.zone.as_ref().map(|z| z.is_dungeon).unwrap_or(false);
         let i = is_dungeon && t;
@@ -1310,6 +1311,10 @@ impl<'a> Sim<'a> {
         }
         if let Some(lab) = &self.lab {
             if self.time - lab.encounter_start > 120.0 * 1e9 || e {
+                self.res.labyrinth_attempts += 1.0;
+                if self.res.encounters > wins_before {
+                    self.res.labyrinth_clear_time += self.time - lab.encounter_start;
+                }
                 self.enemies = None;
                 e = true;
                 self.q.clear();

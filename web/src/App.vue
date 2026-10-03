@@ -77,7 +77,7 @@ function closeBundled() {
 const noData = computed(() => /还没有游戏数据/.test(error.value))
 const menu = [
   ["/team", "队伍"], ["/simulate", "模拟"], ["/zones", "刷图推荐"], ["/skills", "技能与触发优化"],
-  ["/consumables", "药水触发优化"], ["/upgrades", "整队提升规划"], ["/goal", "目标区域提升"], ["/gear-cost", "装备获取成本"], ["/queue", "批量队列"], ["/jobs", "任务"],
+  ["/consumables", "药水触发优化"], ["/upgrades", "整队提升规划"], ["/goal", "目标区域提升"], ["/gear-cost", "装备获取成本"], ["/labyrinth", "迷宫配置推荐"], ["/queue", "批量队列"], ["/jobs", "任务"],
 ]
 // Ironcow (铁牛) mode lives apart from the market-based pages
 const ironMenu = [["/ironcow", "铁牛模式"]]

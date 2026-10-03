@@ -11,7 +11,7 @@ async function refresh() {
 onMounted(refresh)
 onUnmounted(() => clearTimeout(timer))
 const statusText = { running: "运行中", done: "完成", error: "出错", cancelled: "已取消", interrupted: "中断" }
-const page = { skills: "/skills", consumables: "/consumables", upgrades: "/upgrades", zones: "/zones", queue: "/queue" }
+const page = { skills: "/skills", consumables: "/consumables", upgrades: "/upgrades", zones: "/zones", queue: "/queue", labyrinth: "/labyrinth" }
 async function cancel(j) {
   await call("POST", `/api/jobs/${j.id}/cancel`)
 }

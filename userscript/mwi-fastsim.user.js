@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.3
+// @version      0.4.4
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -176,7 +176,7 @@
     function compactProfile(profile, isCurrent) {
       const src = profile && profile.profile ? profile.profile : profile || {}
       const fields = isCurrent
-        ? ["character", "characterSkills", "characterItems", "combatUnit", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap", "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "characterHouseRoomMap", "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
+        ? ["character", "characterInfo", "characterSkills", "characterItems", "combatUnit", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap", "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "characterHouseRoomMap", "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
         : ["name", "characterName", "sharableCharacter", "characterSkills", "wearableItemMap", "equippedAbilities", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap", "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "currentCombatLoadout", "combatLoadout", "currentLoadout", "loadout", "characterLoadoutMap", "characterHouseRoomMap", "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
       const out = {}
       for (const k of fields) if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = clone(src[k])

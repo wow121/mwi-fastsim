@@ -1,7 +1,7 @@
 // Compiles a worker payload ("start_simulation" message) into the scenario format the Rust
 // engine runs, from the game data (`game`, see game.mjs). No Node APIs: shared by the local server
 // and the browser build.
-import { ABILITY_ALIASES, EXTRA_ABILITIES, extraBuffs, generatePermanentBuffs, labyrinthBuffs, playerFromDTO, zoneBuffs } from "./game.mjs"
+import { ABILITY_ALIASES, EXTRA_ABILITIES, extraBuffs, generatePermanentBuffs, labyrinthBuffs, labyrinthUpgradeBuffs, playerFromDTO, zoneBuffs } from "./game.mjs"
 
 const PLAYER_KEYS = [
   "stabAccuracy", "slashAccuracy", "smashAccuracy", "rangedAccuracy", "magicAccuracy",
@@ -107,7 +107,7 @@ export function compilePayload(game, r) {
   const lab = r.labyrinth ? { monsterHrid: r.labyrinth.labyrinthHrid, roomLevel: r.labyrinth.roomLevel, buffs: labyrinthBuffs(game, r.labyrinth.crates) } : null
   const players = (r.players || []).map((h) => {
     const H = playerFromDTO(game, h)
-    H.zoneBuffs = zone?.buffs || lab?.buffs || []
+    H.zoneBuffs = zone?.buffs || (lab ? lab.buffs.concat(labyrinthUpgradeBuffs(h.labyrinthUpgrades)) : [])
     H.extraBuffs = extra
     H.taskDamageEnabled = task
     return H
