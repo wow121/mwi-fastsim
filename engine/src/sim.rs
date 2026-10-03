@@ -1577,11 +1577,13 @@ impl<'a> Sim<'a> {
         ed.typ = bt::FURY_DAMAGE;
         if f > 0.0 {
             self.q.add(self.time + 15e9, Ev::FuryExp { amount: f, source: e });
+            // Deviation from the reference engine, which keeps the older, stronger Fury
+            // candidate after a miss halves the stacks (issue #1). Replace it instead.
             if batch {
-                self.units[e].add_buffs(&[k, ed], self.time);
+                self.units[e].replace_buffs(&[k, ed], self.time);
             } else {
-                self.units[e].add_buff(&k, self.time);
-                self.units[e].add_buff(&ed, self.time);
+                self.units[e].replace_buff(&k, self.time);
+                self.units[e].replace_buff(&ed, self.time);
             }
         } else if batch {
             self.units[e].remove_buffs(&[k.unique, ed.unique]);

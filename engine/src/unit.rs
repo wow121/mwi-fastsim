@@ -397,6 +397,20 @@ impl Unit {
         }
     }
 
+    pub fn replace_buffs(&mut self, list: &[BuffTemplate], time: f64) {
+        let mut ch = false;
+        for b in list {
+            let before = self.eff(b.unique);
+            self.candidates.shift_remove(&b.unique);
+            self.combat_buffs.shift_remove(&b.unique);
+            self.add_candidate(b, time, false);
+            ch = ch || Self::changed(before, self.eff(b.unique));
+        }
+        if ch {
+            self.update();
+        }
+    }
+
     pub fn remove_buffs(&mut self, uniques: &[u32]) {
         let mut ch = false;
         for &u in uniques {
@@ -803,5 +817,60 @@ impl Buckets {
             f += b;
         }
         (r, f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn player() -> Unit {
+        Unit::new_player(
+            "/players/test",
+            PlayerStatic {
+                equip: Vec::new(),
+                style: Style::Stab,
+                style_hrid: String::new(),
+                dtype: DType::Physical,
+                attack_interval: 3e9,
+                primary_training: String::new(),
+                focus_training: String::new(),
+                food_slots: 0.0,
+                drink_slots: 0.0,
+                bulwark: false,
+                xp_weights: [0.0; 7],
+            },
+        )
+    }
+
+    fn fury(ratio: f64) -> BuffTemplate {
+        BuffTemplate {
+            unique: 1,
+            typ: bt::FURY_ACCURACY,
+            ratio,
+            flat: 0.0,
+            duration: 15e9,
+            has_multiplier_skill: false,
+            multiplier_skill: None,
+            multiplier_per_level: 0.0,
+        }
+    }
+
+    // Issue #1: after a miss halves the Fury stacks the weaker buff must take effect at once.
+    #[test]
+    fn replace_buffs_lets_weaker_fury_take_effect() {
+        let mut u = player();
+        u.replace_buffs(&[fury(0.15)], 0.0);
+        u.replace_buffs(&[fury(0.075)], 1e9);
+        assert_eq!(u.combat_buffs[&1].ratio, 0.075);
+        u.replace_buff(&fury(0.0375), 2e9);
+        assert_eq!(u.combat_buffs[&1].ratio, 0.0375);
+        assert_eq!(u.candidates[&1].len(), 1);
+
+        // add_buff keeps the stronger candidate, which is why fury() must not use it
+        let mut u = player();
+        u.add_buffs(&[fury(0.15)], 0.0);
+        u.add_buffs(&[fury(0.075)], 1e9);
+        assert_eq!(u.combat_buffs[&1].ratio, 0.15);
     }
 }
