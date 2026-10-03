@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.4
+// @version      0.4.5
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -220,6 +220,49 @@
       }
       return null
     }
+    // The game page's React state: the labyrinth settings (loadout and level setting per room
+    // type), the loadouts and the crates are only there (same lookup as the labyrinth calculator).
+    function reactGameState() {
+      const ok = s => !!(s && typeof s === "object" && ("characterLabyrinth" in s || "combatUnit" in s || "gameConn" in s))
+      try {
+        const page = document.querySelector('[class^="GamePage"]')
+        const key = page && Object.keys(page).find(k => k.startsWith("__reactFiber$"))
+        const direct = key && page[key]?.return?.stateNode?.state
+        if (ok(direct)) return direct
+        const root = document.getElementById("root")
+        const queue = [root && root._reactRootContainer && root._reactRootContainer.current]
+        const seen = new Set()
+        for (let steps = 0; queue.length && steps < 20000; steps++) {
+          const f = queue.shift()
+          if (!f || typeof f !== "object" || seen.has(f)) continue
+          seen.add(f)
+          if (ok(f.stateNode && f.stateNode.state)) return f.stateNode.state
+          if (f.child) queue.push(f.child)
+          if (f.sibling) queue.push(f.sibling)
+        }
+      } catch {}
+      return null
+    }
+    const entriesOf = c => (c instanceof Map ? Array.from(c.entries()) : c && typeof c === "object" ? Object.entries(c) : [])
+    const plain = v => (v == null ? v : JSON.parse(JSON.stringify(v, (k, x) => (x instanceof Map ? Object.fromEntries(x) : x))))
+    function labyrinthSnapshot() {
+      const s = reactGameState() || gameState()
+      if (!s) return null
+      const setting = {}
+      for (const [k, v] of entriesOf(s.characterSetting)) if (k.startsWith("labyrinth")) setting[k] = v
+      const loadouts = []
+      for (const [k, l] of entriesOf(s.characterLoadoutDict))
+        if (l && l.actionTypeHrid === "/action_types/combat")
+          loadouts.push({ id: Number(l.id ?? k), name: String(l.name || ""), useExactEnhancement: !!l.useExactEnhancement, wearableMap: plain(l.wearableMap) || {}, abilityMap: plain(l.abilityMap) || {}, abilityCombatTriggersMap: plain(l.abilityCombatTriggersMap) ?? null })
+      const combat = entriesOf(s.characterSkillMap).find(([k]) => k === "/skills/combat")
+      const lab = s.characterLabyrinth || {}
+      return {
+        combatLevel: Number(combat && combat[1] && combat[1].level) || null,
+        setting,
+        loadouts,
+        crates: { tea: String(lab.teaCrateItemHrid || ""), coffee: String(lab.coffeeCrateItemHrid || ""), food: String(lab.foodCrateItemHrid || "") },
+      }
+    }
     function resolvePartyNames(info, state) {
       if (!info || typeof info !== "object") return []
       const slotSource = info.partySlotMap || info.partySlotsMap || info.partyMemberMap || info.partySlots
@@ -253,6 +296,13 @@
     }
     function buildEnvelope() {
       const cache = readCache()
+      const current = compactProfile(lastRaw, true)
+      try {
+        const lab = labyrinthSnapshot()
+        if (lab) current.labyrinthState = lab
+      } catch (e) {
+        console.error("[fastsim] labyrinth", e)
+      }
       const own = profileName(lastRaw)
       const roster = partyNames.length ? partyNames.slice(0, 5) : [own]
       const members = []
@@ -260,14 +310,14 @@
       for (const name of roster) {
         if (!name) continue
         if (name.toLowerCase() === own.toLowerCase()) {
-          members.push({ characterName: own, isCurrent: true, format: "main-site-current-character", payload: compactProfile(lastRaw, true) })
+          members.push({ characterName: own, isCurrent: true, format: "main-site-current-character", payload: current })
           continue
         }
         const c = cache[name.toLowerCase()]
         if (c && c.payload) members.push({ characterName: name, isCurrent: false, format: "shareable-profile", payload: { profile: c.payload } })
         else missing.push(name)
       }
-      return { schemaVersion: 1, capturedAt: Date.now(), source: "milkywayidle", currentCharacter: compactProfile(lastRaw, true), members, missingMembers: missing }
+      return { schemaVersion: 1, capturedAt: Date.now(), source: "milkywayidle", currentCharacter: current, members, missingMembers: missing }
     }
 
     // --- send ----------------------------------------------------------------------------
@@ -346,6 +396,17 @@
       }
     }
     hookSocket(["init_character_data", "profile_shared"], data => onMessage({ data }))
+    // the labyrinth settings live in the page state: send again when they change
+    let lastLab = ""
+    setInterval(() => {
+      if (!lastRaw) return
+      let t = ""
+      try { t = JSON.stringify(labyrinthSnapshot()) } catch {}
+      if (t && t !== lastLab) {
+        if (lastLab) scheduleSend()
+        lastLab = t
+      }
+    }, 30000)
     setTimeout(() => {
       if (done) return
       const o = characterFromStorage()

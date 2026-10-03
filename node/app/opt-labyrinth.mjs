@@ -1,7 +1,12 @@
-// Labyrinth loadouts for one character. For every labyrinth monster: the gear (from what the
-// character owns) and abilities that clear the highest room level at a success rate of at least
-// `threshold`, then single purchases that would raise that level further.
+// Labyrinth loadouts for one character, modelled like the labyrinth clear-rate calculator: every
+// labyrinth monster (room type) starts from the loadout the game has set for it, no food or
+// drinks (the labyrinth has crates instead), no task badge, no guild / community buffs; the
+// labyrinth upgrades and the selected combat crates apply. The game's automation picks the room
+// level as effective level + setting - 1 (effective level = combat level + the crates' level
+// bonus), so results are given as that setting ("+N" / "-N").
 //
+// For every monster: the gear (from what the character owns) and abilities that clear the highest
+// room level at a success rate of at least `threshold`, then single purchases that would raise it.
 // A room is won when the monster dies within 120 s. The success rate at a room level is
 // wins / ended rooms over a few long runs with fixed seeds (common random numbers), so it falls
 // with the level and the highest level is found by a doubling + binary search. Candidates are
@@ -22,6 +27,8 @@ const MAX_LEVEL = 1000
 const CONCURRENCY = 32
 const SLOT_ZH = { weapon: "武器", off_hand: "副手", head: "头部", body: "身体", legs: "腿部", hands: "手部", feet: "脚部", back: "背部", neck: "项链", earrings: "耳环", ring: "戒指", pouch: "袋子", charm: "护符", trinket: "饰品" }
 const BUY_LEVELS = [0, 5, 8, 10, 12, 14]
+// task badges do nothing in the labyrinth
+const LAB_SLOTS = EQUIPMENT_SLOTS.filter(s => s !== "trinket")
 
 /** Slot of an equipment item in the team config ("weapon" for main / two hand). */
 function slotOf(maps, h) {
@@ -51,7 +58,7 @@ class Lab {
     this.api = api
     this.m = ev.ctx.m
     this.maps = this.m.$e
-    this.extra = params.extra
+    this.extra = {}
     this.crates = params.crates || []
     this.threshold = Math.min(0.999, Math.max(0.5, Number(params.threshold || 0.95)))
     this.hours = Number(params.hours || 12)
@@ -87,7 +94,8 @@ class Lab {
 
   /** Highest room level with success rate >= threshold (0 if not even level 1), with its stats. */
   async maxLevel(cfg, monster, hint = 100) {
-    const ok = async l => (await this.rate(cfg, monster, l)).p >= this.threshold
+    // like the calculator: the success rate as a whole percent against the target
+    const ok = async l => Math.round((await this.rate(cfg, monster, l)).p * 100) >= Math.round(this.threshold * 100)
     let lo = 0
     let hi = null
     let probe = Math.max(1, Math.round(hint))
@@ -165,7 +173,7 @@ function ownedBySlot(maps, cfg) {
 
 function describeCfg(m, cfg) {
   const maps = m.$e
-  const equipment = EQUIPMENT_SLOTS.map(s => {
+  const equipment = LAB_SLOTS.map(s => {
     const e = cfg.equipment?.[s]
     return { slot: s, slotName: SLOT_ZH[s], itemHrid: e?.itemHrid || "", name: e?.itemHrid ? zh(maps, e.itemHrid) : "—", enhancementLevel: Number(e?.enhancementLevel || 0) }
   })
@@ -177,7 +185,7 @@ function describeCfg(m, cfg) {
 async function optimizeGear(lab, cur, monster, owned, label) {
   const maps = lab.maps
   let changed = false
-  for (const slot of EQUIPMENT_SLOTS) {
+  for (const slot of LAB_SLOTS) {
     const now = cur.cfg.equipment?.[slot]
     if (slot === "off_hand" && isTwoHand(maps, cur.cfg.equipment?.weapon?.itemHrid)) continue
     const cands = owned[slot].filter(x => !sameItem(now, x.h, x.n)).map(x => ({ cfg: withItem(maps, cur.cfg, slot, x.h, x.n) }))
@@ -214,7 +222,7 @@ async function purchases(lab, cur, monster, gp, owned, label, maxSpend) {
   const cands = []
   for (const h of Object.keys(maps.itemDetailMap)) {
     const slot = slotOf(maps, h)
-    if (!slot || !meetsLevels(maps, cur.cfg, h)) continue
+    if (!LAB_SLOTS.includes(slot) || !meetsLevels(maps, cur.cfg, h)) continue
     if (slot === "off_hand" && isTwoHand(maps, cur.cfg.equipment?.weapon?.itemHrid)) continue
     let table
     try {
@@ -259,32 +267,76 @@ async function purchases(lab, cur, monster, gp, owned, label, maxSpend) {
   return front.sort((a, b) => b.gain - a.gain || a.cost - b.cost)
 }
 
+/** Effective-level bonus of the crates: combat / action level buffs plus the mean skill level buff. */
+function crateLevelBonus(maps, crates) {
+  let direct = 0
+  let sum = 0
+  let n = 0
+  for (const h of crates) for (const b of maps.labyrinthCrateDetailMap?.[h] || []) {
+    const v = Number(b.flatBoost || 0)
+    if (!v) continue
+    if (b.typeHrid === "/buff_types/combat_level" || b.typeHrid === "/buff_types/action_level") direct += v
+    else if (/^\/buff_types\/(stamina|intelligence|attack|defense|melee|ranged|magic)_level$/.test(b.typeHrid)) {
+      sum += v
+      n++
+    }
+  }
+  return Math.max(0, direct + (n ? sum / n : 0))
+}
+
+/** The member as the labyrinth sees it for one monster: that room type's loadout, no consumables. */
+function labConfig(member, room) {
+  const c = clone(member)
+  if (room?.equipment) {
+    c.equipment = clone(room.equipment)
+    c.abilities = clone(room.abilities)
+    c.triggerMap = { ...(c.triggerMap || {}), ...clone(room.triggerMap || {}) }
+    for (const a of c.abilities) if (a.abilityHrid && !(a.abilityHrid in room.triggerMap)) delete c.triggerMap[a.abilityHrid]
+  }
+  if (c.equipment?.trinket) c.equipment.trinket = { itemHrid: "", enhancementLevel: 0 }
+  c.food = ["", "", ""]
+  c.drinks = ["", "", ""]
+  c.guildBuffs = {}
+  return c
+}
+
+const signed = n => (n > 0 ? `+${n}` : String(n))
+
 /**
- * params: { member (config), monsters?: [hrid], threshold (0.95), crates: [hrid], extra,
- *           hours, seeds, buy (true), maxSpend, tax, buyPrice, sellPrice }
+ * params: { member (config with .labyrinth from the game), monsters?: [hrid], threshold (0.95),
+ *           crates?: [hrid] (default: the game's selection), hours, seeds, buy (true), maxSpend,
+ *           tax, buyPrice, sellPrice }
  */
 export async function optimizeLabyrinth(ev, params, api) {
-  const lab = new Lab(ev, params, api)
-  const maps = lab.maps
   const member = clone(params.member)
+  const game = member.labyrinth || null
+  const crates = Array.isArray(params.crates) ? params.crates : game?.crates || []
+  const lab = new Lab(ev, { ...params, crates }, api)
+  const maps = lab.maps
   const all = Object.values(maps.combatMonsterDetailMap).filter(x => x.isLabyrinthMonster).map(x => x.hrid)
   const monsters = params.monsters?.length ? params.monsters.filter(h => all.includes(h)) : all
-  const owned = ownedBySlot(maps, member)
-  const nOwned = Object.values(owned).reduce((a, l) => a + l.length, 0)
-  if (!member.ownedEquipment) api.log("没有读到背包（请更新油猴脚本后重新同步），只在身上穿的装备里选")
-  api.log(`${member.name || "角色"}：可选装备 ${nOwned} 件，通关率阈值 ${(lab.threshold * 100).toFixed(0)}%`)
+  const combatLevel = Number(game?.combatLevel) || 0
+  const effective = Math.floor(combatLevel + crateLevelBonus(maps, crates))
+  if (!game) api.log("没有读到迷宫设置（请更新油猴脚本到 0.4.5 后在游戏里重新同步），按当前身上的配装、战斗等级 0 算")
+  if (!member.ownedEquipment) api.log("没有读到背包，只在配装里的装备中选")
+  api.log(`${member.name || "角色"}：战斗等级 ${combatLevel}，补给箱 ${crates.map(h => zh(maps, h)).join("、") || "无"}，有效等级 ${effective}；通关率阈值 ${(lab.threshold * 100).toFixed(0)}%`)
   const lu = member.labyrinthUpgrades
   api.log(lu ? `迷宫升级：攻速 ${lu.attackSpeed} · 施法 ${lu.castSpeed} · 伤害 ${lu.combatDamage} · 暴击 ${lu.criticalRate}` : "没有读到迷宫升级，按 0 级算")
   const gp = params.buy === false ? null : new GearPrices(maps, pricedBook(ev.ctx.book, params), Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04)
   const maxSpend = Number(params.maxSpend) > 0 ? Number(params.maxSpend) : INF
+  // setting = room level - effective level + 1
+  const setting = level => level - effective + 1
   const results = []
-  let hint = 100
+  let hint = Math.max(1, effective)
   for (const [i, monster] of monsters.entries()) {
     const name = zh(maps, monster)
     const label = `${i + 1}/${monsters.length} ${name}`
-    api.progress(0, 1, `${label} · 当前配置`)
-    const current = await lab.maxLevel(member, monster, hint)
-    let cur = { cfg: clone(member), best: current }
+    const room = game?.monsters?.[monster]
+    const base = labConfig(member, room)
+    const owned = ownedBySlot(maps, base)
+    api.progress(0, 1, `${label} · 现在的配装`)
+    const current = await lab.maxLevel(base, monster, hint)
+    let cur = { cfg: base, best: current }
     for (let round = 0; round < 2; round++) {
       const g = await optimizeGear(lab, cur, monster, owned, label)
       const a = await optimizeAbilities(lab, g.cur, monster, label)
@@ -293,19 +345,26 @@ export async function optimizeLabyrinth(ev, params, api) {
     }
     hint = cur.best.level || hint
     const buys = gp ? await purchases(lab, cur, monster, gp, owned, label, maxSpend) : []
+    const gameSetting = room?.skip ?? null
+    const atGame = gameSetting == null ? null : await lab.rate(base, monster, Math.max(1, effective + gameSetting - 1))
     const r = {
       monster,
       name,
-      current: { level: current.level, p: current.p, avgClear: current.avgClear },
-      best: { level: cur.best.level, p: cur.best.p, avgClear: cur.best.avgClear, ...describeCfg(lab.m, cur.cfg) },
+      loadoutName: room?.loadoutName || "",
+      loadoutSource: room?.source || "none",
+      gameSetting,
+      gameSettingP: atGame?.p ?? null,
+      current: { level: current.level, setting: setting(current.level), p: current.p, avgClear: current.avgClear, ...describeCfg(lab.m, base) },
+      best: { level: cur.best.level, setting: setting(cur.best.level), p: cur.best.p, avgClear: cur.best.avgClear, ...describeCfg(lab.m, cur.cfg) },
       triggerMap: cur.cfg.triggerMap,
+      currentTriggerMap: base.triggerMap,
       config: cur.cfg,
-      purchases: buys.slice(0, 8),
+      purchases: buys.slice(0, 8).map(b => ({ ...b, setting: setting(b.level) })),
     }
     results.push(r)
-    api.log(`${name}：当前 ${current.level} 级 → 推荐 ${cur.best.level} 级${buys[0] ? `；买 ${buys[0].name} +${buys[0].enhancementLevel} 可到 ${buys[0].level} 级` : ""}`)
-    api.partial({ results, threshold: lab.threshold })
+    api.log(`${name}（${r.loadoutName || "无配装"}）：现在设置 ${gameSetting == null ? "未设" : signed(gameSetting)}；现在的配装推荐 ${signed(r.current.setting)}，换装后推荐 ${signed(r.best.setting)}${buys[0] ? `；买 ${buys[0].name} +${buys[0].enhancementLevel} 可到 ${signed(setting(buys[0].level))}` : ""}`)
+    api.partial({ results, threshold: lab.threshold, effective, combatLevel })
   }
   api.log(`完成，共模拟 ${ev.sims} 次`)
-  return { results, threshold: lab.threshold, memberName: member.name }
+  return { results, threshold: lab.threshold, memberName: member.name, effective, combatLevel, crates }
 }

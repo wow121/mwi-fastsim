@@ -26,6 +26,8 @@ try {
   if (process.env.UPG) member.labyrinthUpgrades = Object.fromEntries(["attackSpeed", "castSpeed", "combatDamage", "criticalRate"].map(k => [k, Number(process.env.UPG)]))
   // OWNED="/items/x:5,/items/y:0" adds fake inventory items
   if (process.env.OWNED) member.ownedEquipment = process.env.OWNED.split(",").map(x => ({ itemHrid: x.split(":")[0], enhancementLevel: Number(x.split(":")[1] || 0), count: 1 }))
+  // FAKE_LAB=<combat level> gives every monster the current gear as its loadout, setting +5
+  if (process.env.FAKE_LAB) member.labyrinth = { combatLevel: Number(process.env.FAKE_LAB), crates: [], monsters: Object.fromEntries(o.labyrinths.map(z => [z.hrid, { loadoutId: 1, loadoutName: "测试配装", source: "room", skip: 5, equipment: member.equipment, abilities: member.abilities, triggerMap: member.triggerMap || {} }])) }
   const part = process.argv[2] || ""
   const monsters = o.labyrinths.filter(z => z.name.includes(part) || z.hrid.includes(part)).map(z => z.hrid)
   console.log(`member ${member.name}; monsters ${monsters.length}; owned ${member.ownedEquipment?.length ?? "none"}`)
@@ -40,11 +42,13 @@ try {
   } while (j.status === "running")
   console.log(`status ${j.status} in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
   if (j.error) console.log(j.error)
+  const sg = n => (n == null ? "-" : n > 0 ? `+${n}` : String(n))
+  if (j.result) console.log(`effective level ${j.result.effective}`)
   for (const r of j.result?.results || []) {
-    console.log(`${r.name}: ${r.current.level} -> ${r.best.level} (p ${(r.best.p * 100).toFixed(1)}%, ${r.best.avgClear?.toFixed(1)} s)`)
+    console.log(`${r.name} [${r.loadoutName}]: game ${sg(r.gameSetting)} (p ${r.gameSettingP == null ? "-" : (r.gameSettingP * 100).toFixed(1) + "%"}), now ${sg(r.current.setting)} (${r.current.level}) -> ${sg(r.best.setting)} (${r.best.level}, p ${(r.best.p * 100).toFixed(1)}%, ${r.best.avgClear?.toFixed(1)} s)`)
     console.log("  gear: " + r.best.equipment.filter(e => e.itemHrid).map(e => `${e.slotName} ${e.name}+${e.enhancementLevel}`).join(", "))
     console.log("  abilities: " + r.best.abilities.filter(Boolean).map(a => `${a.name} ${a.level}`).join(", "))
-    for (const b of r.purchases) console.log(`  buy ${b.slotName} ${b.name} +${b.enhancementLevel} ${M(b.cost)} -> ${b.level} (+${b.gain})`)
+    for (const b of r.purchases) console.log(`  buy ${b.slotName} ${b.name} +${b.enhancementLevel} ${M(b.cost)} -> ${sg(b.setting)} (+${b.gain})`)
   }
 } catch (e) {
   console.error(e)

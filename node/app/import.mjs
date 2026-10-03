@@ -220,6 +220,71 @@ function labyrinthUpgrades(info) {
   return Object.keys(out).length ? out : undefined
 }
 
+const pascal = t => String(t || "").split("_").filter(Boolean).map(x => x[0].toUpperCase() + x.slice(1)).join("")
+function parseWearable(v) {
+  const parts = String(v || "").split("::")
+  return parts.length >= 4 && parts[2] ? { itemHrid: parts[2], enhancementLevel: nonNeg(parts[3]) } : null
+}
+
+/**
+ * Labyrinth settings of the logged-in character (the userscript's snapshot of the page state, as
+ * the labyrinth calculator reads it): per labyrinth monster the loadout set for that room type
+ * (equipment with the highest owned enhancement unless the loadout uses exact levels, abilities,
+ * triggers) and the level setting; the combat level and the selected combat crates.
+ */
+function labyrinthFromState(m, st, owned, levels, globalTriggers, skills) {
+  const maps = m.$e
+  if (!st || typeof st !== "object") return undefined
+  const maxEnh = new Map()
+  for (const o of owned || []) maxEnh.set(o.itemHrid, Math.max(maxEnh.get(o.itemHrid) ?? -1, o.enhancementLevel))
+  const config = l => {
+    const equipment = Object.fromEntries(SLOT_KEYS.map(k => [k, { itemHrid: "", enhancementLevel: 0 }]))
+    for (const [loc, v] of Object.entries(l.wearableMap || {})) {
+      const w = parseWearable(v)
+      const slot = slotOf(maps, loc)
+      // task badges do nothing in the labyrinth
+      if (!w || !slot || slot === "trinket") continue
+      equipment[slot] = { itemHrid: w.itemHrid, enhancementLevel: l.useExactEnhancement || !maxEnh.has(w.itemHrid) ? w.enhancementLevel : maxEnh.get(w.itemHrid) }
+    }
+    const abilities = Array.from({ length: ABILITY_SLOTS }, (_, i) => {
+      const h = alias(l.abilityMap?.[i + 1] ?? l.abilityMap?.[String(i + 1)] ?? "")
+      return { abilityHrid: h, level: h ? levels[h] || 1 : 1 }
+    })
+    // a loadout with its own trigger config: an ability missing from it has no conditions
+    const own = l.abilityCombatTriggersMap && typeof l.abilityCombatTriggersMap === "object" && Object.keys(l.abilityCombatTriggersMap).length > 0
+    const triggerMap = {}
+    for (const a of abilities) {
+      if (!a.abilityHrid) continue
+      if (own) triggerMap[a.abilityHrid] = has(l.abilityCombatTriggersMap, a.abilityHrid) ? normalizeConditions(m, list(l.abilityCombatTriggersMap[a.abilityHrid])) : []
+      else if (globalTriggers?.[a.abilityHrid]) triggerMap[a.abilityHrid] = globalTriggers[a.abilityHrid]
+    }
+    return { equipment, abilities, triggerMap }
+  }
+  const loadouts = list(st.loadouts).filter(l => l && typeof l === "object").sort((a, b) => Number(a.id) - Number(b.id))
+  const setting = st.setting && typeof st.setting === "object" ? st.setting : {}
+  const monsters = {}
+  for (const mon of Object.values(maps.combatMonsterDetailMap || {})) {
+    if (!mon.isLabyrinthMonster) continue
+    const key = pascal(mon.hrid.split("/").pop())
+    const id = Number(setting[`labyrinthLoadout${key}`] || 0)
+    let l = loadouts.find(x => Number(x.id) === id)
+    const source = l ? "room" : loadouts.length ? "fallback" : "missing"
+    if (!l) l = loadouts[0]
+    const skip = Number(setting[`labyrinthSkip${key}`])
+    monsters[mon.hrid] = { loadoutId: l ? Number(l.id) : 0, loadoutName: l?.name || "", source, skip: Number.isFinite(skip) ? Math.floor(skip) : null, ...(l ? config(l) : {}) }
+  }
+  const c = st.crates || {}
+  const pick = (a, b) => String(a || b || "")
+  const coffee = pick(c.coffee, setting.labyrinthCoffeeCrateHrid)
+  const food = pick(c.food, setting.labyrinthFoodCrateHrid)
+  const tea = pick(c.tea, setting.labyrinthTeaCrateHrid)
+  const crates = [coffee, food].filter(Boolean)
+  if (!crates.length && /coffee_crate|food_crate/.test(tea)) crates.push(tea)
+  let combatLevel = Number(st.combatLevel) || 0
+  if (!combatLevel) for (const f of list(skills)) if (f?.skillHrid === "/skills/combat") combatLevel = Number(f.level) || 0
+  return { combatLevel, crates: crates.filter(h => maps.labyrinthCrateDetailMap?.[h]), monsters, capturedAt: Date.now() }
+}
+
 function normalizeLabyrinthUpgrades(v) {
   const out = {}
   for (const k of LABYRINTH_UPGRADE_KEYS) out[k] = Math.min(12, nonNeg(v?.[k]))
@@ -344,6 +409,8 @@ function normalizePlayer(m, e, base) {
   if (lu && typeof lu === "object") a.labyrinthUpgrades = normalizeLabyrinthUpgrades(lu)
   const owned = i.ownedEquipment ?? n.ownedEquipment
   if (Array.isArray(owned)) a.ownedEquipment = clone(owned)
+  const lab = i.labyrinth ?? n.labyrinth
+  if (lab && typeof lab === "object") a.labyrinth = clone(lab)
   return a
 }
 
@@ -377,6 +444,8 @@ function fromCurrentCharacter(m, e, base) {
   const lu = labyrinthUpgrades(e?.characterInfo)
   if (lu !== undefined) p.labyrinthUpgrades = lu
   if (has(e, "characterItems")) p.ownedEquipment = ownedEquipment(maps, e.characterItems)
+  const lab = labyrinthFromState(m, e?.labyrinthState, p.ownedEquipment, p.abilityLevelMap, p.triggerMap, e?.characterSkills)
+  if (lab) p.labyrinth = lab
   return normalizePlayer(m, p, base)
 }
 
