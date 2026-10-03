@@ -365,7 +365,13 @@ impl Unit {
             cand: self.next_cand,
         };
         self.next_cand += 1;
-        self.candidates.entry(t.unique).or_default().push(b);
+        let list = self.candidates.entry(t.unique).or_default();
+        // In the game a later application of a buff overwrites the earlier one, even when it is
+        // weaker (issue #1). The reference engine kept every copy and applied the strongest.
+        if !permanent {
+            list.retain(|a| a.permanent);
+        }
+        list.push(b);
         self.select_strongest(t.unique);
         Self::changed(before, self.eff(t.unique))
     }
@@ -383,30 +389,6 @@ impl Unit {
 
     pub fn add_buff(&mut self, b: &BuffTemplate, time: f64) {
         if self.add_candidate(b, time, false) {
-            self.update();
-        }
-    }
-
-    pub fn replace_buff(&mut self, b: &BuffTemplate, time: f64) {
-        let before = self.eff(b.unique);
-        self.candidates.shift_remove(&b.unique);
-        self.combat_buffs.shift_remove(&b.unique);
-        self.add_candidate(b, time, false);
-        if Self::changed(before, self.eff(b.unique)) {
-            self.update();
-        }
-    }
-
-    pub fn replace_buffs(&mut self, list: &[BuffTemplate], time: f64) {
-        let mut ch = false;
-        for b in list {
-            let before = self.eff(b.unique);
-            self.candidates.shift_remove(&b.unique);
-            self.combat_buffs.shift_remove(&b.unique);
-            self.add_candidate(b, time, false);
-            ch = ch || Self::changed(before, self.eff(b.unique));
-        }
-        if ch {
             self.update();
         }
     }
@@ -856,21 +838,21 @@ mod tests {
         }
     }
 
-    // Issue #1: after a miss halves the Fury stacks the weaker buff must take effect at once.
+    // Issue #1: a later, weaker application (Fury after a miss, a lower-level teammate's
+    // debuff) must take effect at once instead of the stronger earlier copy.
     #[test]
-    fn replace_buffs_lets_weaker_fury_take_effect() {
-        let mut u = player();
-        u.replace_buffs(&[fury(0.15)], 0.0);
-        u.replace_buffs(&[fury(0.075)], 1e9);
-        assert_eq!(u.combat_buffs[&1].ratio, 0.075);
-        u.replace_buff(&fury(0.0375), 2e9);
-        assert_eq!(u.combat_buffs[&1].ratio, 0.0375);
-        assert_eq!(u.candidates[&1].len(), 1);
-
-        // add_buff keeps the stronger candidate, which is why fury() must not use it
+    fn later_buff_overwrites_stronger_one() {
         let mut u = player();
         u.add_buffs(&[fury(0.15)], 0.0);
         u.add_buffs(&[fury(0.075)], 1e9);
-        assert_eq!(u.combat_buffs[&1].ratio, 0.15);
+        assert_eq!(u.combat_buffs[&1].ratio, 0.075);
+        u.add_buff(&fury(0.0375), 2e9);
+        assert_eq!(u.combat_buffs[&1].ratio, 0.0375);
+        assert_eq!(u.candidates[&1].len(), 1);
+        // the surviving copy expires on its own schedule
+        u.remove_expired(16e9);
+        assert_eq!(u.combat_buffs[&1].ratio, 0.0375);
+        u.remove_expired(17e9);
+        assert!(u.combat_buffs.get(&1).is_none());
     }
 }

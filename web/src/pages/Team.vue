@@ -4,7 +4,7 @@ import { ElMessage } from "element-plus"
 import { abilityName, call, clone, itemName, loadState, saveTeam, store } from "../api.js"
 import TriggerEditor from "../components/TriggerEditor.vue"
 
-const SLOTS = [["weapon", "武器"], ["off_hand", "副手"], ["head", "头"], ["body", "身体"], ["legs", "腿"], ["hands", "手"], ["feet", "脚"], ["back", "背"], ["neck", "项链"], ["earrings", "耳环"], ["ring", "戒指"], ["pouch", "袋子"], ["charm", "护符"]]
+const SLOTS = [["weapon", "武器"], ["off_hand", "副手"], ["head", "头"], ["body", "身体"], ["legs", "腿"], ["hands", "手"], ["feet", "脚"], ["back", "背"], ["neck", "项链"], ["earrings", "耳环"], ["ring", "戒指"], ["pouch", "袋子"], ["charm", "护符"], ["trinket", "饰品"]]
 const SKILLS = [["stamina", "耐力"], ["intelligence", "智力"], ["attack", "攻击"], ["melee", "近战"], ["defense", "防御"], ["ranged", "远程"], ["magic", "魔法"]]
 const o = computed(() => store.options)
 const dirty = ref(false)

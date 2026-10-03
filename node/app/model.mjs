@@ -4,7 +4,7 @@
 import { playerStats } from "./game.mjs"
 
 export const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
-export const EQUIPMENT_SLOTS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm"]
+export const EQUIPMENT_SLOTS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket"]
 const MAX_CONDITIONS = 4
 
 const clone = (v) => JSON.parse(JSON.stringify(v))

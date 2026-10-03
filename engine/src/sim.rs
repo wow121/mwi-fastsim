@@ -1521,13 +1521,15 @@ impl<'a> Sim<'a> {
             Ev::WeakenExp { source, .. } if !curse => *source == e,
             _ => false,
         });
-        let n = js::max(0.0, js::or0(u));
-        let o = js::max(0.0, js::or0(t));
-        let amount = js::max(n, js::min(n + o, o * 5.0));
+        // The event carries the stack count, and the buff is the current source's value times the
+        // stacks, so a weaker source lowers it (issue #1 follow-up). The reference engine stored
+        // max(prev, min(prev + t, 5t)) instead, which never went down when sources differ.
+        let amount = js::min(u + 1.0, 5.0);
+        let v = amount * t;
         let (unique, typ, ratio, flat) = if curse {
-            (self.u_curse, bt::DAMAGE_TAKEN, 0.0, amount)
+            (self.u_curse, bt::DAMAGE_TAKEN, 0.0, v)
         } else {
-            (self.u_weaken, bt::DAMAGE, -1.0 * amount, 0.0)
+            (self.u_weaken, bt::DAMAGE, -1.0 * v, 0.0)
         };
         let h = BuffTemplate {
             unique,
@@ -1539,7 +1541,7 @@ impl<'a> Sim<'a> {
             multiplier_skill: None,
             multiplier_per_level: 0.0,
         };
-        self.units[e].replace_buff(&h, self.time);
+        self.units[e].add_buff(&h, self.time);
         let ev = if curse {
             Ev::CurseExp { amount, source: e }
         } else {
@@ -1577,13 +1579,11 @@ impl<'a> Sim<'a> {
         ed.typ = bt::FURY_DAMAGE;
         if f > 0.0 {
             self.q.add(self.time + 15e9, Ev::FuryExp { amount: f, source: e });
-            // Deviation from the reference engine, which keeps the older, stronger Fury
-            // candidate after a miss halves the stacks (issue #1). Replace it instead.
             if batch {
-                self.units[e].replace_buffs(&[k, ed], self.time);
+                self.units[e].add_buffs(&[k, ed], self.time);
             } else {
-                self.units[e].replace_buff(&k, self.time);
-                self.units[e].replace_buff(&ed, self.time);
+                self.units[e].add_buff(&k, self.time);
+                self.units[e].add_buff(&ed, self.time);
             }
         } else if batch {
             self.units[e].remove_buffs(&[k.unique, ed.unique]);
