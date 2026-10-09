@@ -4,6 +4,11 @@
 // then its trigger (templates with coarse-then-fine thresholds). Coordinate descent over all
 // members and slots; only changes that are clearly better than noise are adopted, and the result
 // is kept only if the final paired review confirms it.
+// A new item is tried with its game default trigger and, when it restores the same thing (HP / MP)
+// as the item it replaces, also with that item's trigger: a default that fires too early can make
+// a better item lose before its trigger is ever tuned. Each round starts with team-wide swaps (an
+// item held by several members replaced for all of them at once), whose gain is large enough to
+// show above the noise where a single member's share would not.
 import { halving } from "./search.mjs"
 import { defaultTriggers, teamDTO, triggersFor } from "./model.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
@@ -74,6 +79,28 @@ function conflicts(m, a, b) {
   return [...buffUniques(m, b)].some(u => ua.has(u))
 }
 
+/** "hp" / "mp" for a restoring food, "" otherwise. */
+function restores(m, h) {
+  const d = m.$e.itemDetailMap[h]?.consumableDetail || {}
+  return d.hitpointRestore > 0 ? "hp" : d.manapointRestore > 0 ? "mp" : ""
+}
+
+/**
+ * Trigger variants for `to` replacing `from` in a member: the game default and, for the same kind of
+ * restore, `from`'s current trigger. Each variant: { carried, apply(member) } (sets the triggerMap entry).
+ */
+function swapTriggers(m, member, from, to) {
+  const out = [{ carried: false, apply: x => { if (x.triggerMap) delete x.triggerMap[to] } }]
+  if (from && restores(m, from) && restores(m, from) === restores(m, to)) {
+    const carried = triggersFor(m, member.triggerMap || {}, from)
+    if (JSON.stringify(carried) !== JSON.stringify(defaultTriggers(m, to)))
+      out.push({ carried: true, apply: x => { x.triggerMap = { ...(x.triggerMap || {}), [to]: clone(carried) } } })
+  }
+  return out
+}
+
+const CARRIED = "（沿用原触发）"
+
 /** params: { members, target, extra, objective, optimize, rounds, swapItems, allowItems? (candidate items; default all) } */
 export async function optimizeConsumables(ev, params, api) {
   const { m } = ev.ctx
@@ -82,6 +109,8 @@ export async function optimizeConsumables(ev, params, api) {
   const optimize = params.optimize?.length ? params.optimize : members.map((_, i) => i)
   const itemStages = [{ hours: 4, seeds: 2, keep: 6 }, { hours: 12, seeds: 6, keep: 2 }]
   const trigStages = [{ hours: 6, seeds: 4, keep: 4 }, { hours: 12, seeds: 8, keep: 2 }]
+  // team swaps: few of them, and their gains (a few %) need more seeds to survive the first cut
+  const teamStages = [{ hours: 6, seeds: 6, keep: 8 }, { hours: 12, seeds: 12, keep: 3 }, { hours: 24, seeds: 24, keep: 2 }]
   const common = { target, extra, objective, signal: api.signal }
   const infos = teamDTO(m, members).map(d => memberInfo(m, d))
   const pool = Object.fromEntries(KINDS.map(([k, cat]) => [k, Object.values(m.$e.itemDetailMap)
@@ -95,6 +124,51 @@ export async function optimizeConsumables(ev, params, api) {
 
   for (let round = 1; round <= rounds; round++) {
     let changed = false
+
+    // 0) team-wide swaps: an item held by two or more members, replaced for all of them
+    if (swapItems && optimize.length > 1) {
+      for (const [kind, , kindName] of KINDS) {
+        const held = [...new Set(optimize.flatMap(i => (members[i][kind] || []).filter(Boolean)))]
+          .map(from => ({ from, who: optimize.filter(i => (members[i][kind] || []).includes(from)) }))
+          .filter(x => x.who.length > 1)
+        for (const { from, who } of held) {
+          if (api.signal.aborted) throw new Error("cancelled")
+          const cands = [{ key: from, members: clone(members), incumbent: true }]
+          for (const to of pool[kind]) {
+            if (to === from) continue
+            const fits = who.every(i => (members[i][kind] || []).filter(h => h && h !== from).every(o => o !== to && !conflicts(m, to, o)))
+            if (!fits) continue
+            // default triggers for all, or each member's own trigger of the replaced item (default where it has none to carry)
+            const variants = who.map(i => swapTriggers(m, members[i], from, to))
+            for (const carried of variants.some(v => v.length > 1) ? [false, true] : [false]) {
+              const mem = clone(members)
+              who.forEach((i, k) => {
+                mem[i][kind] = mem[i][kind].map(h => (h === from ? to : h))
+                ;(carried ? variants[k].at(-1) : variants[k][0]).apply(mem[i])
+              })
+              cands.push({ key: carried ? to + CARRIED : to, hrid: to, carried, members: mem })
+            }
+          }
+          const where = `全队 · ${kindName} · ${zh(m.$e, from)}`
+          const ranked = await halving(ev, cands, {
+            ...common,
+            stages: teamStages,
+            seedBase: 500 * round + (kind === "food" ? 0 : 11) + pool[kind].indexOf(from),
+            onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 全队换药`),
+          })
+          const best = ranked[0]
+          if (!best.incumbent && best.vsIncumbent?.clearlyBetter) {
+            members = best.members
+            changed = true
+            const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED : "")
+            changes.push({ round, member: who[0], members: who, team: true, kind, what: "物品", from: zh(m.$e, from), to, gain: best.vsIncumbent })
+            api.log(`${where} → ${to}（${who.length} 人，+${fmt(best.vsIncumbent.mean, objective)}）`)
+            api.partial({ members, changes, baseline: baseline.mean, objective })
+          }
+        }
+      }
+    }
+
     for (const idx of optimize) {
       const who = members[idx].name || `队员${idx + 1}`
       for (const [kind, , kindName] of KINDS) {
@@ -111,11 +185,13 @@ export async function optimizeConsumables(ev, params, api) {
             for (const h of pool[kind]) {
               if (h === cur || others.includes(h)) continue
               if (others.some(o => conflicts(m, h, o))) continue
-              const mem = clone(members)
-              mem[idx][kind] = [...(mem[idx][kind] || ["", "", ""])]
-              mem[idx][kind][slot] = h
-              if (mem[idx].triggerMap) delete mem[idx].triggerMap[h] // start from the game default trigger
-              cands.push({ key: h, members: mem })
+              for (const v of swapTriggers(m, members[idx], cur, h)) {
+                const mem = clone(members)
+                mem[idx][kind] = [...(mem[idx][kind] || ["", "", ""])]
+                mem[idx][kind][slot] = h
+                v.apply(mem[idx])
+                cands.push({ key: v.carried ? h + CARRIED : h, hrid: h, carried: v.carried, members: mem })
+              }
             }
             const ranked = await halving(ev, cands, {
               ...common,
@@ -127,8 +203,9 @@ export async function optimizeConsumables(ev, params, api) {
             if (!best.incumbent && best.vsIncumbent?.clearlyBetter) {
               members = best.members
               changed = true
-              changes.push({ round, member: idx, kind, slot, what: "物品", from: cur ? zh(m.$e, cur) : "空", to: zh(m.$e, best.key), gain: best.vsIncumbent })
-              api.log(`${where}：${cur ? zh(m.$e, cur) : "空"} → ${zh(m.$e, best.key)}（+${fmt(best.vsIncumbent.mean, objective)}）`)
+              const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED : "")
+              changes.push({ round, member: idx, kind, slot, what: "物品", from: cur ? zh(m.$e, cur) : "空", to, gain: best.vsIncumbent })
+              api.log(`${where}：${cur ? zh(m.$e, cur) : "空"} → ${to}（+${fmt(best.vsIncumbent.mean, objective)}）`)
             }
           }
 

@@ -100,7 +100,7 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
         <el-collapse-item :title="`搜索过程（${(result.changes || []).length} 次采用${result.rejected?.length ? `，${result.rejected.length} 次复核后撤回` : ''}）`">
           <el-table :data="result.changes?.length ? result.changes : result.rejected" size="small">
             <el-table-column label="轮" prop="round" width="50" />
-            <el-table-column label="角色" width="120"><template #default="{ row }">{{ members[row.member]?.name }}</template></el-table-column>
+            <el-table-column label="角色" width="120"><template #default="{ row }">{{ row.team ? row.members.map(i => members[i]?.name).join("、") : members[row.member]?.name }}</template></el-table-column>
             <el-table-column label="改动" width="60" prop="what" />
             <el-table-column label="内容"><template #default="{ row }">{{ row.from ? `${row.from} → ` : "" }}{{ row.to }}</template></el-table-column>
             <el-table-column label="当时提升" align="right"><template #default="{ row }">+{{ fmtObj(row.gain.mean) }}</template></el-table-column>
