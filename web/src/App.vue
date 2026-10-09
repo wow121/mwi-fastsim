@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { call, detectMode, loadState, store } from "./api.js"
 import { ElMessage } from "element-plus"
+import { commit, releases, version } from "./changelog.js"
 
 const route = useRoute()
 const error = ref("")
@@ -81,12 +82,41 @@ const menu = [
 ]
 // Ironcow (铁牛) mode lives apart from the market-based pages
 const ironMenu = [["/ironcow", "铁牛模式"]]
+
+// release notes: "新" until the current version's notes have been opened once
+const showLog = ref(false)
+const lastSeen = ref((() => {
+  try {
+    return localStorage.getItem("fastsim-seen-version")
+  } catch {
+    return version
+  }
+})())
+const isNew = computed(() => lastSeen.value !== null && lastSeen.value !== version)
+function openLog() {
+  showLog.value = true
+  lastSeen.value = version
+  try {
+    localStorage.setItem("fastsim-seen-version", version)
+  } catch {}
+}
+// first visit: nothing to announce, remember the version silently
+if (lastSeen.value === null) {
+  lastSeen.value = version
+  try {
+    localStorage.setItem("fastsim-seen-version", version)
+  } catch {}
+}
 </script>
 
 <template>
   <el-container style="height: 100%">
     <el-aside width="190px" style="border-right: 1px solid var(--el-border-color)">
-      <div style="padding: 16px 16px 8px; font-weight: 600">MWI 战斗工具</div>
+      <div style="padding: 16px 16px 8px">
+        <div style="font-weight: 600">MWI 战斗工具</div>
+        <el-link :underline="false" class="muted" @click="openLog" :title="commit ? `构建 ${commit}，点击查看更新日志` : '点击查看更新日志'">{{ version }}</el-link>
+        <el-tag v-if="isNew" type="danger" size="small" effect="dark" round style="margin-left: 6px; cursor: pointer" @click="openLog">新</el-tag>
+      </div>
       <el-menu :default-active="'/' + (route.path.split('/')[1] || 'team')" router style="border: none">
         <el-menu-item v-for="[p, t] in menu" :key="p" :index="p">{{ t }}</el-menu-item>
         <el-menu-item-group title="铁牛">
@@ -103,6 +133,8 @@ const ironMenu = [["/ironcow", "铁牛模式"]]
           <el-link type="primary" :href="SCRIPT_URL" target="_blank">安装油猴脚本</el-link>
           <span> · </span>
           <el-link :href="REPO_URL" target="_blank">GitHub</el-link>
+          <span> · </span>
+          <el-link @click="openLog">更新日志</el-link>
         </div>
         <div>如需反馈，游戏中私聊 Dawant，有空会处理</div>
       </div>
@@ -127,4 +159,13 @@ const ironMenu = [["/ironcow", "铁牛模式"]]
       <div v-else-if="!error" class="page muted">加载中…{{ store.mode === "browser" ? "（浏览器模式：下载市场价并启动引擎，第一次要几秒）" : "" }}</div>
     </el-main>
   </el-container>
+  <el-dialog v-model="showLog" title="更新日志" width="min(640px, 92vw)">
+    <div class="muted" style="margin-top: -8px; margin-bottom: 8px">当前版本 {{ version }}{{ commit ? `（构建 ${commit}）` : "" }}</div>
+    <div v-for="r in releases" :key="r.version" style="margin-bottom: 12px">
+      <div style="font-weight: 600">{{ r.version }} <span class="muted" style="font-weight: normal">{{ r.date }}</span></div>
+      <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.7">
+        <li v-for="(t, i) in r.items" :key="i">{{ t }}</li>
+      </ul>
+    </div>
+  </el-dialog>
 </template>

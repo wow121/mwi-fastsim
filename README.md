@@ -80,7 +80,9 @@ node/start-server.sh      # Windows：双击 node/start-server.cmd
 3. 安装本地服务的依赖（`node/`）。
 4. 安装网页依赖并构建到 `web/dist`，构建前会把 wasm 引擎复制进去。
 
-更新代码后重新运行一次即可。本地服务需要重启；部署的网页则重新上传 `web/dist`。
+更新代码后重新运行一次即可。
+
+版本号和更新日志在 [`CHANGELOG.md`](CHANGELOG.md)：网页左侧栏显示第一个版本标题，点开可以看完整日志。发布新版本时在最上面加一节。本地服务需要重启；部署的网页则重新上传 `web/dist`。
 
 ## 项目结构
 
