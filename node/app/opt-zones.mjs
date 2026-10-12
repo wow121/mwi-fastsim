@@ -25,7 +25,7 @@ export async function recommendZones(ev, params, api) {
   })
   const key = objective === "xp" ? "xpPerHour" : "profitPerHour"
   rows.sort((a, b) => (b.metrics?.[key] ?? -Infinity) - (a.metrics?.[key] ?? -Infinity))
-  return { rows, hours, seeds: seeds.length, objective }
+  return { rows, names: members.map(c => c.name), hours, seeds: seeds.length, objective }
 }
 
 /** params: { items: [{ label, members, target, hours, seeds, extra }] } */

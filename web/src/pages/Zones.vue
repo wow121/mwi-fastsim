@@ -27,7 +27,9 @@ function params() {
   if (!targets.length) return ElMessage.warning("没有可模拟的目标")
   return { members, targets, hours: hours.value, seeds: seeds.value, extra: extra.value, objective: objective.value }
 }
-const rows = computed(() => (result.value?.rows || []).filter(r => r.metrics).map(r => ({ ...r, ...r.metrics })))
+const rows = computed(() => (result.value?.rows || []).filter(r => r.metrics).map(r => ({ ...r, ...r.metrics, key: `${r.target.zoneHrid}#${r.target.difficultyTier}` })))
+const memberName = i => result.value?.names?.[i] || `成员${i + 1}`
+const playerRows = row => (row.players || []).map((p, i) => ({ name: memberName(i), ...p }))
 </script>
 
 <template>
@@ -64,7 +66,21 @@ const rows = computed(() => (result.value?.rows || []).filter(r => r.metrics).ma
       <JobRunner name="zones" type="zones" :params="params" @result="r => (result = r)" />
     </el-card>
     <el-card v-if="rows.length">
-      <el-table :data="rows" size="small" :default-sort="{ prop: objective === 'xp' ? 'xpPerHour' : 'profitPerHour', order: 'descending' }">
+      <el-table :data="rows" size="small" row-key="key" :default-sort="{ prop: objective === 'xp' ? 'xpPerHour' : 'profitPerHour', order: 'descending' }">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <el-table :data="playerRows(row)" size="small" style="margin: 0 0 4px 48px; width: calc(100% - 48px)">
+              <el-table-column prop="name" label="角色" min-width="110" />
+              <el-table-column label="经验/小时" align="right"><template #default="{ row: p }">{{ int(p.xpPerHour) }}</template></el-table-column>
+              <el-table-column label="收入/天" align="right"><template #default="{ row: p }">{{ perDay(p.revenuePerHour) }}</template></el-table-column>
+              <el-table-column label="消耗/天" align="right"><template #default="{ row: p }">{{ perDay(p.expensesPerHour) }}</template></el-table-column>
+              <el-table-column label="利润下限/天" align="right"><template #default="{ row: p }">{{ perDay(p.profitPerHour) }}</template></el-table-column>
+              <el-table-column label="利润中值/天" align="right"><template #default="{ row: p }">{{ perDay(p.profitMidpointPerHour) }}</template></el-table-column>
+              <el-table-column label="死亡/小时" align="right"><template #default="{ row: p }"><span :class="{ bad: p.deathsPerHour > 0 }">{{ p.deathsPerHour.toFixed(2) }}</span></template></el-table-column>
+              <el-table-column label="空蓝" align="right"><template #default="{ row: p }">{{ pct(p.outOfManaTimeRatio) }}</template></el-table-column>
+            </el-table>
+          </template>
+        </el-table-column>
         <el-table-column label="目标" min-width="160"><template #default="{ row }">{{ row.name }} · T{{ row.target.difficultyTier }}</template></el-table-column>
         <el-table-column prop="profitPerHour" label="利润下限/天" sortable align="right"><template #default="{ row }">{{ perDay(row.profitPerHour) }}</template></el-table-column>
         <el-table-column prop="profitMidpointPerHour" label="利润中值/天" sortable align="right"><template #default="{ row }">{{ perDay(row.profitMidpointPerHour) }}</template></el-table-column>
