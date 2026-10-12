@@ -255,6 +255,7 @@ export function playerFromDTO(game, t) {
     permanentBuffs: {},
     zoneBuffs: [],
     extraBuffs: [],
+    statBonus: t.statBonus || null,
   }
   for (const s of SKILLS) p[`${s}Level`] = t[`${s}Level`]
   let a = []

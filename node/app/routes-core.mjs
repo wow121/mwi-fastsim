@@ -12,6 +12,7 @@ import { planGoal } from "./opt-goal.mjs"
 import { recommendZones, runQueue } from "./opt-zones.mjs"
 import { optimizeLabyrinth } from "./opt-labyrinth.mjs"
 import { gearCost } from "./gear-cost.mjs"
+import { statValue } from "./opt-statvalue.mjs"
 import { EMPTY_IRONCOW_TEAM, IRONCOW_JOBS, ironcowRoutes } from "./ironcow/jobs.mjs"
 
 export { EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes }
@@ -24,6 +25,7 @@ export const JOB_TYPES = {
   zones: { title: "刷图推荐", run: recommendZones },
   queue: { title: "批量队列", run: runQueue },
   labyrinth: { title: "迷宫配置推荐", run: optimizeLabyrinth },
+  statvalue: { title: "属性价值", run: statValue },
   ...IRONCOW_JOBS,
 }
 

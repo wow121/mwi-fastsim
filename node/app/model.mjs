@@ -108,6 +108,7 @@ export function playerDTO(m, cfg, index) {
     labyrinthUpgrades: clone(cfg.labyrinthUpgrades ?? {}),
     debuffOnLevelGap: 0,
   }
+  if (cfg.statBonus) dto.statBonus = clone(cfg.statBonus)
   const slots = consumableSlots(m, dto)
   const tm = cfg.triggerMap ?? {}
   for (let l = 0; l < 3; l++) {

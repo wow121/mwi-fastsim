@@ -66,6 +66,8 @@ export function scenarioPlayer(p) {
   for (const k of PLAYER_KEYS) {
     equipStats[k] = Object.values(eq).filter(i => i != null).map(i => i.getCombatStat(k)).reduce((i, a) => i + a, 0)
   }
+  // extra stats on top of the equipment (stat value analysis)
+  for (const [k, v] of Object.entries(p.statBonus || {})) if (k in equipStats) equipStats[k] += Number(v) || 0
   const pouch = eq["/equipment_types/pouch"]
   const charm = eq["/equipment_types/charm"]
   return {

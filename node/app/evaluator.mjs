@@ -74,7 +74,7 @@ export class Evaluator {
     const per = runs.map(r => r.metrics)
     const mean = average(per)
     if (items) mean.items = teamItems(this.ctx.book, runs.map(r => r.result), members.length)
-    return { mean, perSeed: per.map(p => objectiveValue(p, objective)), value: objectiveValue(mean, objective) }
+    return { mean, per, perSeed: per.map(p => objectiveValue(p, objective)), value: objectiveValue(mean, objective) }
   }
 }
 
