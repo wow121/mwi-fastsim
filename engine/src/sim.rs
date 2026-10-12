@@ -542,7 +542,10 @@ impl<'a> Sim<'a> {
                 same_time = 0;
             }
             self.time = e.time;
-            self.process(e.ev)?;
+            let ev = e.ev.clone();
+            if let Err(err) = self.process(e.ev) {
+                return Err(format!("{} (event {:?} at {} s)", err, ev, self.time / 1e9));
+            }
             if let Some(err) = self.res.error.take() {
                 return Err(err);
             }
@@ -608,6 +611,7 @@ impl<'a> Sim<'a> {
 
     fn process(&mut self, ev: Ev) -> Result<(), SimErr> {
         let _prof = crate::prof::start("process(all)");
+        if let Ok(w) = std::env::var("MWI_TRACE_FROM") { let w: f64 = w.parse().unwrap(); if self.time / 1e9 >= w && self.time / 1e9 <= w + 20.0 && !matches!(ev, Ev::RegenTick | Ev::CheckBuffExpiration { .. } | Ev::ConsumableTick { .. }) { eprintln!("WIN t={:.3} ev={:?} enemies={:?} php={:?} ehp={:?}", self.time / 1e9, ev, self.enemies.as_deref().map(|e| e.to_vec()), self.players.iter().map(|&p| self.units[p].d.hp).collect::<Vec<_>>(), self.enemies.as_deref().map(|e| e.iter().map(|&u| self.units[u].d.hp).collect::<Vec<_>>())); } }
         match ev {
             Ev::CombatStart => self.on_combat_start()?,
             Ev::PlayerRespawn { hrid } => self.on_player_respawn(hrid)?,
@@ -923,6 +927,7 @@ impl<'a> Sim<'a> {
 
     fn kill(&mut self, u: UnitId) {
         let _prof = crate::prof::start("kill");
+        if std::env::var("MWI_TRACE_FROM").is_ok() { eprintln!("KILL t={:.3} u={} player={}", self.time / 1e9, u, self.units[u].is_player); }
         self.q.clear_for_unit(u);
         let h = self.units[u].hid;
         self.res.add_death(h);
@@ -1299,6 +1304,11 @@ impl<'a> Sim<'a> {
                         EvType::BlindExp,
                         EvType::SilenceExp,
                         EvType::AwaitCooldown,
+                        // the last wave can be cleared just before the wipe (players killed by a
+                        // damage over time while the next wave is pending): without this the
+                        // pending respawn and the restart both spawn a wave, and the first one's
+                        // monsters keep acting outside the encounter
+                        EvType::EnemyRespawn,
                     ] {
                         self.q.clear_type(ty);
                     }
@@ -2024,7 +2034,21 @@ impl<'a> Sim<'a> {
                             "/monsters/enchanted_bishop",
                         ];
                         let n = (self.rng.next() * 3.0).floor() as usize;
+                        let pawn = e;
                         e = self.spawn_monster(names[n], tier, 0.0)?;
+                        // The pawn becomes the new piece. The original engine left the pawn in the
+                        // encounter (idle, but it had to be killed) and the piece outside it: the
+                        // players could not target it, it kept attacking into later waves and
+                        // failed once no encounter was running ("allies list missing").
+                        if let Some(en) = self.enemies.clone() {
+                            if en.contains(&pawn) {
+                                let list: Vec<UnitId> = en.iter().map(|&u| if u == pawn { e } else { u }).collect();
+                                self.enemies = Some(Rc::from(list));
+                                let (ph, nh) = (self.units[pawn].hid, self.units[e].hid);
+                                self.res.update_time_spent_alive(self.it.name(ph), false, self.time);
+                                self.res.update_time_spent_alive(self.it.name(nh), true, self.time);
+                            }
+                        }
                         self.add_next_attack(e)?;
                     }
                     EffectKind::Other => {
