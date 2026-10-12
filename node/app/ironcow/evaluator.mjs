@@ -7,7 +7,7 @@
 import { compilePayload } from "../engine-core.mjs"
 import { buildPayload } from "../model.mjs"
 import { activePlayer, dungeonInfo, effectiveTime, outOfManaRatio, playerDrops, runs } from "../metrics.mjs"
-import { OBJECTIVE_FORMATS } from "../evaluator.mjs"
+import { OBJECTIVE_FORMATS, spread } from "../evaluator.mjs"
 import { CraftTimes } from "./craft.mjs"
 
 const HOUR = 3600e9
@@ -154,6 +154,7 @@ const NUMERIC = ["itemsPerHour", "coinsPerHour", "xpPerHour", "craftRatio", "com
 function average(list) {
   const avg = get => list.reduce((a, x) => a + get(x), 0) / list.length
   const out = Object.fromEntries(NUMERIC.map(k => [k, avg(x => x[k])]))
+  out.ci = spread(list, NUMERIC.filter(k => k === "deathsPerHour" || k === "xpPerHour"))
   const keys = new Set(list.flatMap(x => Object.keys(x.targetsPerHour)))
   out.targetsPerHour = Object.fromEntries([...keys].map(h => [h, avg(x => x.targetsPerHour[h] || 0)]))
   out.players = list[0].players.map((_, i) => {

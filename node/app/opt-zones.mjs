@@ -7,7 +7,8 @@ import { zh } from "./i18n.mjs"
 export async function recommendZones(ev, params, api) {
   const { members, extra, objective = "profit" } = params
   const hours = params.hours || 24
-  const seeds = seedList(424242, params.seeds || 2)
+  // seedBase: a different set of random battles (to check a result); default fixed, so reruns match
+  const seeds = seedList(Number(params.seedBase || 424242), params.seeds || 8)
   const { m } = ev.ctx
   let done = 0
   const rows = await pool(params.targets, 16, async (t) => {
@@ -25,7 +26,7 @@ export async function recommendZones(ev, params, api) {
   })
   const key = objective === "xp" ? "xpPerHour" : "profitPerHour"
   rows.sort((a, b) => (b.metrics?.[key] ?? -Infinity) - (a.metrics?.[key] ?? -Infinity))
-  return { rows, names: members.map(c => c.name), hours, seeds: seeds.length, objective }
+  return { rows, names: members.map(c => c.name), hours, seeds: seeds.length, seedBase: params.seedBase || null, objective }
 }
 
 /** params: { items: [{ label, members, target, hours, seeds, extra }] } */

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from "vue"
 import { ElMessage } from "element-plus"
-import { defaultExtra, int, itemName, perDay, pct, qty, selectedMembers, store } from "../api.js"
+import { ci, defaultExtra, int, itemName, money, perDay, pct, qty, randomSeedBase, selectedMembers, store } from "../api.js"
 import { copyText, fileStamp, saveImage, stamp } from "../export.js"
 import JobRunner from "../components/JobRunner.vue"
 import ExtraBuffs from "../components/ExtraBuffs.vue"
@@ -11,7 +11,8 @@ const zones = ref(o.value.zones.map(z => z.hrid))
 const dungeons = ref([])
 const tiers = ref([0, 1, 2])
 const hours = ref(24)
-const seeds = ref(2)
+const seeds = ref(8)
+const reseed = ref(false)
 const extra = ref(defaultExtra())
 const objective = ref("profit")
 const result = ref(null)
@@ -27,7 +28,7 @@ function params() {
     for (const t of tiers.value) if (t <= (z?.maxDifficulty ?? 0)) targets.push({ kind: "zone", zoneHrid: h, difficultyTier: t })
   }
   if (!targets.length) return ElMessage.warning("没有可模拟的目标")
-  return { members, targets, hours: hours.value, seeds: seeds.value, extra: extra.value, objective: objective.value }
+  return { members, targets, hours: hours.value, seeds: seeds.value, seedBase: reseed.value ? randomSeedBase() : undefined, extra: extra.value, objective: objective.value }
 }
 const rows = computed(() => (result.value?.rows || []).filter(r => r.metrics).map(r => ({ ...r, ...r.metrics, key: `${r.target.zoneHrid}#${r.target.difficultyTier}` })))
 const memberName = i => result.value?.names?.[i] || `成员${i + 1}`
@@ -46,7 +47,7 @@ function summary() {
   const lines = [`【刷图推荐】${(r.names || []).join("、")}（每个目标 ${r.hours} 小时 × ${r.seeds} 次，按${r.objective === "xp" ? "经验" : "利润"}排序，${stamp()}）`]
   sorted.slice(0, 15).forEach((x, i) => {
     const top = revenueRows(x)[0]
-    lines.push(`${i + 1}. ${x.name} T${x.target.difficultyTier}：利润 ${perDay(x.profitPerHour)}/天（中值 ${perDay(x.profitMidpointPerHour)}/天），经验 ${int(x.xpPerHour)}/小时，死亡 ${x.deathsPerHour.toFixed(2)}/小时${top ? `，主要收入 ${itemName(top.itemHrid)} ${pct(top.share)}` : ""}`)
+    lines.push(`${i + 1}. ${x.name} T${x.target.difficultyTier}：利润 ${perDay(x.profitPerHour)}/天（中值 ${perDay(x.profitMidpointPerHour)}/天），经验 ${int(x.xpPerHour)}/小时，死亡 ${x.deathsPerHour.toFixed(2)}${ci(x, "deathsPerHour")}/小时${top ? `，主要收入 ${itemName(top.itemHrid)} ${pct(top.share)}` : ""}`)
   })
   return lines.join("\n")
 }
@@ -79,7 +80,8 @@ function summary() {
       <div class="row" style="margin-bottom: 8px"><ExtraBuffs v-model="extra" /></div>
       <div class="row" style="margin-bottom: 12px">
         <span class="muted">每个目标</span><el-input-number v-model="hours" :min="1" :max="240" size="small" /><span class="muted">小时 ×</span>
-        <el-input-number v-model="seeds" :min="1" :max="16" size="small" /><span class="muted">次</span>
+        <el-input-number v-model="seeds" :min="1" :max="64" size="small" /><span class="muted">次</span>
+        <el-tooltip content="默认每次用同一组随机战斗，重跑结果不变；勾上后换一组，用来检查结果是否稳定" placement="top"><el-checkbox v-model="reseed" size="small">换一组随机种子</el-checkbox></el-tooltip>
         <span class="muted">排序</span>
         <el-radio-group v-model="objective" size="small"><el-radio-button value="profit">利润</el-radio-button><el-radio-button value="xp">经验</el-radio-button></el-radio-group>
       </div>
@@ -90,7 +92,7 @@ function summary() {
       </div>
     </el-card>
     <el-card v-if="rows.length" ref="out">
-      <div class="muted" style="margin-bottom: 6px">{{ (result.names || []).join("、") }} · 每个目标 {{ result.hours }} 小时 × {{ result.seeds }} 次 · 点左侧箭头展开每个成员和主要收入</div>
+      <div class="muted" style="margin-bottom: 6px">{{ (result.names || []).join("、") }} · 每个目标 {{ result.hours }} 小时 × {{ result.seeds }} 次{{ result.seedBase ? "（换过随机种子）" : "" }} · ± 是 95% 范围，死亡数波动很大，次数越多越准 · 点左侧箭头展开每个成员和主要收入</div>
       <el-table :data="rows" size="small" row-key="key" :default-sort="{ prop: objective === 'xp' ? 'xpPerHour' : 'profitPerHour', order: 'descending' }">
         <el-table-column type="expand">
           <template #default="{ row }">
@@ -126,10 +128,10 @@ function summary() {
           </template>
         </el-table-column>
         <el-table-column label="目标" min-width="160"><template #default="{ row }">{{ row.name }} · T{{ row.target.difficultyTier }}</template></el-table-column>
-        <el-table-column prop="profitPerHour" label="利润下限/天" sortable align="right"><template #default="{ row }">{{ perDay(row.profitPerHour) }}</template></el-table-column>
+        <el-table-column prop="profitPerHour" label="利润下限/天" sortable align="right"><template #default="{ row }">{{ perDay(row.profitPerHour) }} <span class="muted">{{ ci(row, "profitPerHour", v => money(v * 24)) }}</span></template></el-table-column>
         <el-table-column prop="profitMidpointPerHour" label="利润中值/天" sortable align="right"><template #default="{ row }">{{ perDay(row.profitMidpointPerHour) }}</template></el-table-column>
         <el-table-column prop="xpPerHour" label="经验/小时" sortable align="right"><template #default="{ row }">{{ int(row.xpPerHour) }}</template></el-table-column>
-        <el-table-column prop="deathsPerHour" label="死亡/小时" sortable align="right"><template #default="{ row }"><span :class="{ bad: row.deathsPerHour > 0 }">{{ row.deathsPerHour.toFixed(2) }}</span></template></el-table-column>
+        <el-table-column prop="deathsPerHour" label="死亡/小时" sortable align="right"><template #default="{ row }"><span :class="{ bad: row.deathsPerHour > 0 }">{{ row.deathsPerHour.toFixed(2) }}</span> <span class="muted">{{ ci(row, "deathsPerHour") }}</span></template></el-table-column>
         <el-table-column prop="encountersPerHour" label="遭遇/小时" sortable align="right"><template #default="{ row }">{{ row.encountersPerHour.toFixed(1) }}</template></el-table-column>
         <el-table-column label="空蓝" align="right"><template #default="{ row }">{{ pct(row.outOfManaTimeRatio) }}</template></el-table-column>
       </el-table>

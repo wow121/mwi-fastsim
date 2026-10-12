@@ -11,9 +11,23 @@ export function seedList(base, n) {
 
 const METRIC_KEYS = ["xpPerHour", "profitPerHour", "profitMidpointPerHour", "deathsPerHour", "encountersPerHour", "outOfManaTimeRatio"]
 
+/** Half width of the 95% interval of the mean over seeds, per key ({} with fewer than 2 seeds).
+ *  Deaths in particular vary a lot between runs (they come in chains). */
+export function spread(list, keys) {
+  const n = list.length
+  if (n < 2) return {}
+  return Object.fromEntries(keys.map(k => {
+    const m = list.reduce((a, x) => a + x[k], 0) / n
+    const sd = Math.sqrt(list.reduce((a, x) => a + (x[k] - m) ** 2, 0) / (n - 1))
+    return [k, (1.96 * sd) / Math.sqrt(n)]
+  }))
+}
+export const SPREAD_KEYS = ["xpPerHour", "profitPerHour", "profitMidpointPerHour", "deathsPerHour"]
+
 function average(list) {
   const out = {}
   for (const k of METRIC_KEYS) out[k] = list.reduce((a, x) => a + x[k], 0) / list.length
+  out.ci = spread(list, SPREAD_KEYS)
   const n = list[0].players.length
   out.players = Array.from({ length: n }, (_, i) => {
     const o = {}

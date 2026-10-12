@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
-import { COMBAT_SKILLS, attackName, call, defaultExtra, defaultTarget, duration, int, itemName, money, monsterName, perDay, pct, qty, selectedMembers, store, targetLabel } from "../api.js"
+import { COMBAT_SKILLS, attackName, call, ci, randomSeedBase, defaultExtra, defaultTarget, duration, int, itemName, money, monsterName, perDay, pct, qty, selectedMembers, store, targetLabel } from "../api.js"
 import { copyText, fileStamp, saveImage, stamp } from "../export.js"
 import TargetPicker from "../components/TargetPicker.vue"
 import ExtraBuffs from "../components/ExtraBuffs.vue"
@@ -9,7 +9,8 @@ import ExtraBuffs from "../components/ExtraBuffs.vue"
 const target = ref(defaultTarget())
 const extra = ref(defaultExtra())
 const hours = ref(24)
-const seeds = ref(4)
+const seeds = ref(8)
+const reseed = ref(false)
 const busy = ref(false)
 const res = ref(null)
 const ms = ref(0)
@@ -24,7 +25,7 @@ async function run() {
   busy.value = true
   const t0 = performance.now()
   try {
-    const body = { members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value }
+    const body = { members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value, seedBase: reseed.value ? randomSeedBase() : undefined }
     res.value = await call("POST", "/api/simulate", body)
     ran.value = JSON.parse(JSON.stringify(body))
     if (who.value >= body.members.length) who.value = 0
@@ -113,7 +114,7 @@ function summary() {
   const r = ran.value
   const lines = [`【模拟】${targetLabel(r.target)}（${r.hours} 小时 × ${r.seeds} 次，${stamp()}）`]
   const m = res.value.mean
-  lines.push(`全队：利润 ${perDay(m.profitPerHour)}/天（中值 ${perDay(m.profitMidpointPerHour)}/天），经验 ${int(m.xpPerHour)}/小时，遭遇 ${m.encountersPerHour.toFixed(1)}/小时，死亡 ${m.deathsPerHour.toFixed(2)}/小时`)
+  lines.push(`全队：利润 ${perDay(m.profitPerHour)}/天（中值 ${perDay(m.profitMidpointPerHour)}/天），经验 ${int(m.xpPerHour)}/小时，遭遇 ${m.encountersPerHour.toFixed(1)}/小时，死亡 ${m.deathsPerHour.toFixed(2)}${ci(m, "deathsPerHour")}/小时`)
   for (const p of rows.value)
     lines.push(`· ${p.name}：利润 ${perDay(p.profitPerHour)}/天，收入 ${perDay(p.revenuePerHour)}/天，消耗 ${perDay(p.expensesPerHour)}/天，经验 ${int(p.xpPerHour)}/小时，死亡 ${p.deathsPerHour.toFixed(2)}/小时，空蓝 ${pct(p.outOfManaTimeRatio)}`)
   return lines.join("\n")
@@ -129,6 +130,7 @@ function summary() {
       <div class="row">
         <span class="muted">时长（小时）</span><el-input-number v-model="hours" :min="1" :max="720" size="small" />
         <span class="muted">重复次数（不同种子，取平均）</span><el-input-number v-model="seeds" :min="1" :max="64" size="small" />
+        <el-tooltip content="默认每次用同一组随机战斗，重跑结果不变；勾上后换一组，用来检查结果是否稳定" placement="top"><el-checkbox v-model="reseed" size="small">换一组随机种子</el-checkbox></el-tooltip>
         <el-button type="primary" :loading="busy" @click="run">开始模拟</el-button>
         <span v-if="res" class="muted">{{ ran.seeds }} × {{ ran.hours }} 小时，用时 {{ (ms / 1000).toFixed(2) }} 秒</span>
         <template v-if="res">
@@ -141,13 +143,13 @@ function summary() {
 
     <div v-if="res" ref="out">
       <el-card>
-        <template #header><b>全队</b><span class="muted" style="margin-left: 8px">{{ targetLabel(ran.target) }} · {{ ran.hours }} 小时 × {{ ran.seeds }} 次</span></template>
+        <template #header><b>全队</b><span class="muted" style="margin-left: 8px">{{ targetLabel(ran.target) }} · {{ ran.hours }} 小时 × {{ ran.seeds }} 次{{ ran.seedBase ? "（换过随机种子）" : "" }} · ± 是 95% 范围</span></template>
         <div class="row" style="gap: 32px">
-          <div>利润（下限）<div style="font-size: 22px">{{ perDay(res.mean.profitPerHour) }}/天</div></div>
+          <div>利润（下限）<div style="font-size: 22px">{{ perDay(res.mean.profitPerHour) }}/天 <span class="muted">{{ ci(res.mean, "profitPerHour", v => money(v * 24)) }}</span></div></div>
           <div>利润（中值）<div style="font-size: 22px">{{ perDay(res.mean.profitMidpointPerHour) }}/天</div></div>
           <div>经验<div style="font-size: 22px">{{ int(res.mean.xpPerHour) }}/小时</div></div>
           <div>遭遇<div style="font-size: 22px">{{ res.mean.encountersPerHour.toFixed(1) }}/小时</div></div>
-          <div>死亡<div style="font-size: 22px" :class="{ bad: res.mean.deathsPerHour > 0 }">{{ res.mean.deathsPerHour.toFixed(2) }}/小时</div></div>
+          <div>死亡<div style="font-size: 22px"><span :class="{ bad: res.mean.deathsPerHour > 0 }">{{ res.mean.deathsPerHour.toFixed(2) }}/小时</span> <span class="muted">{{ ci(res.mean, "deathsPerHour") }}</span></div></div>
         </div>
       </el-card>
       <el-card>

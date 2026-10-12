@@ -1,7 +1,7 @@
 // Request handling shared by the local server (server.mjs) and the browser build
 // (web/src/local/api.js). `st` is the engine context: { m, book, ev }.
 import { profit } from "./metrics.mjs"
-import { seedList } from "./evaluator.mjs"
+import { seedList, SPREAD_KEYS, spread } from "./evaluator.mjs"
 import { importTeam } from "./import.mjs"
 import { memberPool, presets } from "./skill-pools.mjs"
 import { zh } from "./i18n.mjs"
@@ -94,6 +94,7 @@ export async function simulate(st, body) {
       deathsPerHour: avg(x => x.deathsPerHour),
       encountersPerHour: avg(x => x.encountersPerHour),
       players: members.map((_, i) => Object.fromEntries(Object.keys(per[0].players[i]).map(k => [k, avg(x => x.players[i][k])]))),
+      ci: spread(per, SPREAD_KEYS),
     },
     detail: {
       result: first,

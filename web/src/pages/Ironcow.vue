@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
-import { abilityName, call, clone, defaultExtra, defaultTarget, int, itemName, money, pct, store, triggerText } from "../api.js"
+import { abilityName, call, ci, clone, randomSeedBase, defaultExtra, defaultTarget, int, itemName, money, pct, store, triggerText } from "../api.js"
 import JobRunner from "../components/JobRunner.vue"
 import TargetPicker from "../components/TargetPicker.vue"
 import ExtraBuffs from "../components/ExtraBuffs.vue"
@@ -121,7 +121,8 @@ const zones = ref(o.value.zones.map(z => z.hrid))
 const dungeons = ref([])
 const tiers = ref([0, 1, 2])
 const hours = ref(24)
-const seeds = ref(2)
+const seeds = ref(8)
+const reseed = ref(false)
 const extra = ref(defaultExtra())
 const zoneResult = ref(null)
 function zoneParams() {
@@ -133,7 +134,7 @@ function zoneParams() {
     for (const t of tiers.value) if (t <= (z?.maxDifficulty ?? 0)) targets.push({ kind: "zone", zoneHrid: h, difficultyTier: t })
   }
   if (!targets.length) return ElMessage.warning("没有可模拟的目标")
-  return { members: simMembers(), targets, hours: hours.value, seeds: seeds.value, extra: extra.value, ironcow: ironcow() }
+  return { members: simMembers(), targets, hours: hours.value, seeds: seeds.value, seedBase: reseed.value ? randomSeedBase() : undefined, extra: extra.value, ironcow: ironcow() }
 }
 const zoneRows = computed(() => (zoneResult.value?.rows || []).filter(r => r.metrics).map(r => ({ ...r, ...r.metrics })))
 const zoneTargets = computed(() => [...new Set(zoneRows.value.flatMap(r => Object.keys(r.targetsPerHour || {})))])
@@ -286,7 +287,8 @@ const treeRows = (t, path = "") => (t.children || []).map((c, i) => ({ ...c, id:
           </div>
           <div class="row" style="margin-bottom: 12px">
             <span class="muted">每个目标</span><el-input-number v-model="hours" :min="1" :max="240" size="small" /><span class="muted">小时 ×</span>
-            <el-input-number v-model="seeds" :min="1" :max="16" size="small" /><span class="muted">次</span>
+            <el-input-number v-model="seeds" :min="1" :max="64" size="small" /><span class="muted">次</span>
+            <el-tooltip content="默认每次用同一组随机战斗，重跑结果不变；勾上后换一组，用来检查结果是否稳定" placement="top"><el-checkbox v-model="reseed" size="small">换一组随机种子</el-checkbox></el-tooltip>
           </div>
           <JobRunner name="ironcow-zones" type="ironcow-zones" :params="zoneParams" @result="r => (zoneResult = r)" />
         </el-card>
@@ -317,7 +319,7 @@ const treeRows = (t, path = "") => (t.children || []).map((c, i) => ({ ...c, id:
             <el-table-column prop="coinsPerHour" label="商店金币/天" sortable align="right"><template #default="{ row }">{{ money(row.coinsPerHour * 24) }}</template></el-table-column>
             <el-table-column prop="xpPerHour" label="经验/小时" sortable align="right"><template #default="{ row }">{{ int(row.xpPerHour) }}</template></el-table-column>
             <el-table-column prop="combatShare" label="战斗时间占比" sortable align="right"><template #default="{ row }">{{ pct(row.combatShare) }}</template></el-table-column>
-            <el-table-column prop="deathsPerHour" label="死亡/战斗小时" sortable align="right"><template #default="{ row }"><span :class="{ bad: row.deathsPerHour > 0 }">{{ row.deathsPerHour.toFixed(2) }}</span></template></el-table-column>
+            <el-table-column prop="deathsPerHour" label="死亡/战斗小时" sortable align="right"><template #default="{ row }"><span :class="{ bad: row.deathsPerHour > 0 }">{{ row.deathsPerHour.toFixed(2) }}</span> <span class="muted">{{ ci(row, "deathsPerHour") }}</span></template></el-table-column>
           </el-table>
         </el-card>
       </el-tab-pane>

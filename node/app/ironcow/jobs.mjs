@@ -18,7 +18,7 @@ const combatConsumables = maps => Object.values(maps.itemDetailMap)
 async function zones(ev0, params, api) {
   const ev = new IronEvaluator(ev0.ctx, params.ironcow)
   const hours = params.hours || 24
-  const seeds = seedList(424242, params.seeds || 2)
+  const seeds = seedList(Number(params.seedBase || 424242), params.seeds || 8)
   const { m } = ev.ctx
   let done = 0
   const rows = await pool(params.targets, 16, async (t) => {

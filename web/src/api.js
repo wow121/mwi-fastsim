@@ -69,6 +69,14 @@ export function money(v, digits = 2) {
   return v.toFixed(0)
 }
 export const perDay = v => money(v * 24)
+/** "±x" from a result's 95% range (`ci`, filled when there are 2+ seeds), formatted with `fmt`. */
+export function ci(row, key, fmt = v => v.toFixed(2)) {
+  const v = row?.ci?.[key]
+  return v == null || !Number.isFinite(v) || v <= 0 ? "" : `±${fmt(v)}`
+}
+/** A fresh seed base for "换一组随机种子". */
+export const randomSeedBase = () => 1 + Math.floor(Math.random() * 2 ** 31)
+
 /** Item counts: K / M for large ones (coins, essences). */
 export const qty = v => (v == null || !Number.isFinite(v) ? "—" : Math.abs(v) >= 1e4 ? money(v, 2) : v.toFixed(1))
 export const int = v => (v == null || !Number.isFinite(v) ? "—" : Math.round(v).toLocaleString())
