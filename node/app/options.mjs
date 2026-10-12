@@ -44,6 +44,7 @@ export function options(m, book) {
     },
     houseRooms: Object.values(maps.houseRoomDetailMap || {}).map(h => ({ hrid: h.hrid, name: n(h.hrid) })),
     enhancementCap: (maps.enhancementLevelSuccessRateTable || []).length || 20,
+    levelXp: maps.levelExperienceTable || [],
     slotRequirements: maps.abilitySlotsLevelRequirementList || [],
     prices: book ? Object.fromEntries(Object.entries(book.table).filter(([, v]) => v.ask > 0 || v.bid > 0).map(([k, v]) => [k, [v.ask, v.bid]])) : {},
   }

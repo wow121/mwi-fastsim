@@ -68,6 +68,11 @@ pub struct SimResult {
     /// (simulationTime, wave)
     pub wipe_events: Vec<(f64, f64)>,
     pub simulated_time: f64,
+    /// only with `record_attacks`: last damaging hit per unit (source, ability), and what each
+    /// player death came from: (player, source, ability) -> count (`u32::MAX` = unknown)
+    pub last_hit: IndexMap<u32, (u32, u32)>,
+    pub death_causes: IndexMap<(u32, u32, u32), f64>,
+    pub deaths_out_of_mana: IndexMap<u32, f64>,
 }
 
 impl SimResult {
@@ -121,11 +126,26 @@ impl SimResult {
             last_encounter_finish_time: 0.0,
             wipe_events: Vec::new(),
             simulated_time: 0.0,
+            last_hit: IndexMap::default(),
+            death_causes: IndexMap::default(),
+            deaths_out_of_mana: IndexMap::default(),
         }
     }
 
     pub fn add_death(&mut self, hrid: u32) {
         *self.deaths.entry(hrid).or_insert(0.0) += 1.0;
+    }
+
+    /// Death analysis (detail runs only): attributes a player death to the last damaging hit.
+    pub fn record_player_death(&mut self, hrid: u32) {
+        if !self.record_attacks {
+            return;
+        }
+        let (src, ab) = self.last_hit.swap_remove(&hrid).unwrap_or((u32::MAX, u32::MAX));
+        *self.death_causes.entry((hrid, src, ab)).or_insert(0.0) += 1.0;
+        if self.player_ran_out_of_mana_time.get(&hrid).is_some_and(|m| m.is_out) {
+            *self.deaths_out_of_mana.entry(hrid).or_insert(0.0) += 1.0;
+        }
     }
 
     pub fn update_time_spent_alive(&mut self, name: &str, alive: bool, time: f64) {
@@ -179,6 +199,9 @@ impl SimResult {
             Some(d) => DmgKey::Num(if d == 0.0 { 0.0f64.to_bits() } else { d.to_bits() }),
             None => DmgKey::Miss,
         };
+        if dmg.is_some_and(|d| d > 0.0) {
+            self.last_hit.insert(tgt, (src, ability));
+        }
         let inner = self
             .attacks
             .entry((src, tgt, ability))
@@ -283,6 +306,17 @@ impl SimResult {
             }
         }
         o.insert("attacks".into(), Value::Object(att));
+        if self.record_attacks {
+            let nk = |i: &u32| if *i == u32::MAX { "unknown".to_string() } else { nm(i) };
+            let mut dc: Map<String, Value> = Map::new();
+            for ((p, s, a), c) in &self.death_causes {
+                let pm = dc.entry(nm(p)).or_insert_with(|| Value::Object(Map::new())).as_object_mut().unwrap();
+                let sm = pm.entry(nk(s)).or_insert_with(|| Value::Object(Map::new())).as_object_mut().unwrap();
+                sm.insert(nk(a), n(*c));
+            }
+            o.insert("deathCauses".into(), Value::Object(dc));
+            o.insert("deathsOutOfMana".into(), flat(&self.deaths_out_of_mana, names));
+        }
         o.insert("consumablesUsed".into(), nested(&self.consumables_used, names));
         o.insert("hitpointsGained".into(), nested(&self.hitpoints_gained, names));
         o.insert("manapointsGained".into(), nested(&self.manapoints_gained, names));

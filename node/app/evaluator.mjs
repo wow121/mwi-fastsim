@@ -2,7 +2,7 @@
 // results into metrics.
 import { compilePayload } from "./engine-core.mjs"
 import { buildPayload } from "./model.mjs"
-import { teamMetrics } from "./metrics.mjs"
+import { HOUR, effectiveTime, profit, teamMetrics } from "./metrics.mjs"
 
 /** Seeds shared by every candidate of a comparison (common random numbers). */
 export function seedList(base, n) {
@@ -41,25 +41,48 @@ export class Evaluator {
     this.simHours = 0
   }
 
-  /** One run; returns { metrics, result } (result only when `detail`). */
-  async runOnce(members, target, { hours, seed, extra, detail = false }) {
+  /** One run; returns { metrics, result } (result only when `detail` or `keep`). */
+  async runOnce(members, target, { hours, seed, extra, detail = false, keep = false }) {
     const { m, rust, book } = this.ctx
     const payload = buildPayload(m, members, target, { hours, seed, extra })
     const out = await rust.run(compilePayload(m, payload), { attacks: detail })
     this.sims++
     this.simHours += hours
     const result = out.result
-    return { metrics: teamMetrics(book, result, members.length), result: detail ? result : undefined }
+    return { metrics: teamMetrics(book, result, members.length), result: detail || keep ? result : undefined }
   }
 
-  /** Mean metrics over `seeds`; also returns the per-seed objective values. */
-  async evaluate(members, target, { hours, seeds, extra, objective = "profit", signal }) {
+  /** Mean metrics over `seeds`; also returns the per-seed objective values. With `items`, the
+   *  mean also has the team's revenue / expense items per hour (`mean.items`). */
+  async evaluate(members, target, { hours, seeds, extra, objective = "profit", signal, items = false }) {
     if (signal?.aborted) throw new Error("cancelled")
-    const runs = await Promise.all(seeds.map(seed => this.runOnce(members, target, { hours, seed, extra })))
+    const runs = await Promise.all(seeds.map(seed => this.runOnce(members, target, { hours, seed, extra, keep: items })))
     const per = runs.map(r => r.metrics)
     const mean = average(per)
+    if (items) mean.items = teamItems(this.ctx.book, runs.map(r => r.result), members.length)
     return { mean, perSeed: per.map(p => objectiveValue(p, objective)), value: objectiveValue(mean, objective) }
   }
+}
+
+/** Team revenue / expense items per hour, averaged over runs (bid for drops, ask for consumables). */
+function teamItems(book, results, n) {
+  const acc = { revenue: new Map(), expenses: new Map() }
+  for (const r of results) {
+    const h = effectiveTime(r) / HOUR
+    if (!(h > 0)) continue
+    for (let i = 0; i < n; i++) {
+      const p = profit(book, r, `player${i + 1}`, { dropMode: "bid", consumableMode: "ask" })
+      for (const [list, m] of [[p.revenueItems, acc.revenue], [p.expenseItems, acc.expenses]])
+        for (const it of list) {
+          const e = m.get(it.itemHrid) || { itemHrid: it.itemHrid, amountPerHour: 0, valuePerHour: 0 }
+          e.amountPerHour += it.amount / h / results.length
+          e.valuePerHour += it.total / h / results.length
+          m.set(it.itemHrid, e)
+        }
+    }
+  }
+  const out = m => [...m.values()].sort((a, b) => b.valuePerHour - a.valuePerHour)
+  return { revenue: out(acc.revenue), expenses: out(acc.expenses) }
 }
 
 /** Paired comparison of two per-seed series (same seeds). */

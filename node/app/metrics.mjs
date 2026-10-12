@@ -1,7 +1,7 @@
 // Per-player metrics from a simResult, ported from the site's CombatHeader (`o0`, `s0`, `a0`,
 // `u0`) and simulationStatistics (`Ie`). Prices: { [itemHrid]: { ask, bid, vendor } }.
 
-const HOUR = 3600e9
+export const HOUR = 3600e9
 const PLAYERS = new Set(["player1", "player2", "player3", "player4", "player5"])
 const KEY_ARTISAN = 0.897
 const CHESTS = ["/items/small_treasure_chest", "/items/medium_treasure_chest", "/items/large_treasure_chest"]

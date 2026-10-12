@@ -69,8 +69,29 @@ export function money(v, digits = 2) {
   return v.toFixed(0)
 }
 export const perDay = v => money(v * 24)
+/** Item counts: K / M for large ones (coins, essences). */
+export const qty = v => (v == null || !Number.isFinite(v) ? "—" : Math.abs(v) >= 1e4 ? money(v, 2) : v.toFixed(1))
 export const int = v => (v == null || !Number.isFinite(v) ? "—" : Math.round(v).toLocaleString())
 export const pct = v => (v == null || !Number.isFinite(v) ? "—" : `${(v * 100).toFixed(1)}%`)
+
+/** Hours as "x 小时" / "x 天". */
+export function duration(h) {
+  if (h == null || !Number.isFinite(h)) return "—"
+  if (h <= 0) return "已达到"
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} 分钟`
+  return h < 48 ? `${h.toFixed(1)} 小时` : `${(h / 24).toFixed(1)} 天`
+}
+
+export const COMBAT_SKILLS = [["stamina", "耐力"], ["intelligence", "智力"], ["attack", "攻击"], ["melee", "近战"], ["defense", "防御"], ["ranged", "远程"], ["magic", "魔法"]]
+
+const ATTACK_NAMES = { autoAttack: "普攻", damageOverTime: "持续伤害", parry: "招架", retaliation: "反击", physicalThorns: "物理荆棘", elementalThorns: "元素荆棘", unknown: "未知" }
+/** Ability / attack kind keys of a simResult's `attacks` and `deathCauses`. */
+export function attackName(k) {
+  return store.options?.names.abilities[k] || ATTACK_NAMES[k] || k
+}
+export function monsterName(h) {
+  return (h && store.options?.names.monsters[h]) || (h === "unknown" ? "未知" : h) || "—"
+}
 
 export function itemName(h) {
   return (h && store.options?.names.items[h]) || h || "—"

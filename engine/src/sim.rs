@@ -926,6 +926,9 @@ impl<'a> Sim<'a> {
         self.q.clear_for_unit(u);
         let h = self.units[u].hid;
         self.res.add_death(h);
+        if self.units[u].is_player {
+            self.res.record_player_death(h);
+        }
         if !self.units[u].is_player {
             self.res.update_time_spent_alive(self.it.name(h), false, self.time);
         }

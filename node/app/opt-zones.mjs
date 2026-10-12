@@ -13,7 +13,7 @@ export async function recommendZones(ev, params, api) {
   const rows = await pool(params.targets, 16, async (t) => {
     let r
     try {
-      r = await ev.evaluate(members, t, { hours, seeds, extra, objective, signal: api.signal })
+      r = await ev.evaluate(members, t, { hours, seeds, extra, objective, signal: api.signal, items: true })
     } catch (e) {
       if (api.signal.aborted) throw e
       return { target: t, error: String(e.message || e) }
