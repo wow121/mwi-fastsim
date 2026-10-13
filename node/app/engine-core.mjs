@@ -104,9 +104,9 @@ export function compilePayload(game, r) {
   const task = t === "task"
   if (task && (!r.zone?.zoneHrid || r.taskContext?.zoneHrid !== r.zone.zoneHrid))
     throw new Error("Task combat requires a matching zone context")
-  const extra = extraBuffs(game, r.extra)
   const zone = r.zone ? { hrid: r.zone.zoneHrid, difficultyTier: r.zone.difficultyTier, buffs: zoneBuffs(game, r.zone.zoneHrid) } : null
   const lab = r.labyrinth ? { monsterHrid: r.labyrinth.labyrinthHrid, roomLevel: r.labyrinth.roomLevel, buffs: labyrinthBuffs(game, r.labyrinth.crates) } : null
+  const extra = extraBuffs(game, r.extra, { labyrinth: !!lab })
   const players = (r.players || []).map((h) => {
     const H = playerFromDTO(game, h)
     H.zoneBuffs = zone?.buffs || (lab ? lab.buffs.concat(labyrinthUpgradeBuffs(h.labyrinthUpgrades)) : [])

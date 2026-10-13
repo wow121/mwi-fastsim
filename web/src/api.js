@@ -145,13 +145,13 @@ export function defaultTarget() {
   const z = (s.useDungeon ? s.dungeonHrid : s.zoneHrid) || store.options?.zones[0]?.hrid
   return { kind: "zone", zoneHrid: z, difficultyTier: Number(s.difficultyTier || 0) }
 }
-/** Community buffs; unset means the site's defaults (Moo Pass on, levels 20). */
+/** Community buffs and scrolls; unset means the site's defaults (Moo Pass on, levels 20, no scrolls). */
 export function defaultExtra() {
   const r = remembered("fastsim-extra")
-  if (r && typeof r === "object") return r
+  if (r && typeof r === "object") return { ...r, seals: Array.isArray(r.seals) ? r.seals : [] }
   const s = store.team.settings || {}
   const lv = (v, on) => (on === false ? 0 : Math.max(0, Math.min(20, Math.floor(Number.isFinite(Number(v)) ? Number(v) : 20))))
-  return { mooPass: s.mooPass ?? true, comExp: lv(s.comExp, s.comExpEnabled), comDrop: lv(s.comDrop, s.comDropEnabled) }
+  return { mooPass: s.mooPass ?? true, comExp: lv(s.comExp, s.comExpEnabled), comDrop: lv(s.comDrop, s.comDropEnabled), seals: [] }
 }
 
 /** Readable trigger of an ability/consumable in a member config ("游戏默认" when not set). */

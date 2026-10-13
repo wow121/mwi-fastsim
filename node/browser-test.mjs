@@ -64,7 +64,7 @@ try {
   const members = team.selected.map(id => team.members.find(p => String(p.id) === String(id)))
   const o = await (await fetch("http://127.0.0.1:8799/api/options")).json().catch(() => null)
   const zone = o?.zones?.[0]?.hrid || "/actions/combat/golem_cave"
-  const body = { members, target: { kind: "zone", zoneHrid: zone, difficultyTier: 1 }, hours: 24, seeds: 16, extra: { mooPass: true, comExp: 20, comDrop: 20 } }
+  const body = { members, target: { kind: "zone", zoneHrid: zone, difficultyTier: 1 }, hours: 24, seeds: 16, extra: { mooPass: true, comExp: 20, comDrop: 20, seals: ["combat_drop", "critical_rate"] } }
   t0 = Date.now()
   const b = await ev(`const r = await __fastsim.call("POST", "/api/simulate", ${JSON.stringify(body)}); return r.mean`)
   const tb = Date.now() - t0

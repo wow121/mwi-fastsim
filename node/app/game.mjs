@@ -361,8 +361,31 @@ function leveledBuff(r, e = 1) {
   }
 }
 
-/** `ei`: Moo Pass + community experience / drop quantity buffs. */
-export function extraBuffs(game, r = {}) {
+/** Labyrinth scrolls (`/items/seal_of_*`) that matter in combat: a 30-minute personal buff, not active in the
+ *  labyrinth or guild trials. The game data only links the item to `/personal_buff_types/<key>`, so the values are
+ *  kept here (damage / attack speed are ratio boosts like the labyrinth clear-rate calculator has them). */
+export const COMBAT_SEALS = Object.freeze([
+  { key: "combat_drop", typeHrid: "/buff_types/combat_drop_quantity", flatBoost: 0.15 },
+  { key: "wisdom", typeHrid: "/buff_types/wisdom", flatBoost: 0.2 },
+  { key: "rare_find", typeHrid: "/buff_types/rare_find", flatBoost: 0.6 },
+  { key: "damage", typeHrid: "/buff_types/damage", ratioBoost: 0.08 },
+  { key: "critical_rate", typeHrid: "/buff_types/critical_rate", flatBoost: 0.1 },
+  { key: "cast_speed", typeHrid: "/buff_types/cast_speed", flatBoost: 0.15 },
+  { key: "attack_speed", typeHrid: "/buff_types/attack_speed", ratioBoost: 0.15 },
+])
+
+/** Buffs of the selected scroll keys (unknown keys are ignored). */
+export function sealBuffs(keys) {
+  if (!Array.isArray(keys)) return []
+  return COMBAT_SEALS.filter(s => keys.includes(s.key)).map(s => ({
+    uniqueHrid: `/buff_uniques/personal_${s.key}`, typeHrid: s.typeHrid,
+    ratioBoost: s.ratioBoost ?? 0, flatBoost: s.flatBoost ?? 0, duration: 0,
+  }))
+}
+
+/** `ei`: Moo Pass + community experience / drop quantity buffs, plus the selected scrolls (`r.seals`,
+ *  skipped with `labyrinth`). */
+export function extraBuffs(game, r = {}, { labyrinth = false } = {}) {
   const e = { mooPass: !!r?.mooPass, comExp: clampLevel(r?.comExp, 0), comDrop: clampLevel(r?.comDrop, 0) }
   const community = type => {
     const b = game.$e.communityBuffTypeDetailMap?.[type]?.buff
@@ -372,6 +395,7 @@ export function extraBuffs(game, r = {}) {
   if (e.mooPass) t.push(leveledBuff(MOO_PASS, 1))
   if (e.comExp > 0) t.push(community(COM_EXP))
   if (e.comDrop > 0) t.push(community(COM_DROP))
+  if (!labyrinth) t.push(...sealBuffs(r?.seals))
   return t.filter(Boolean)
 }
 

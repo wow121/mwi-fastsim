@@ -95,7 +95,7 @@ engine/            Rust 战斗引擎
 node/
   server.mjs         本地服务：/api/* 接口、网页、模拟网站加速（/simulate）
   app/               共享逻辑（本地服务和浏览器版共用，不依赖 Node API）
-    game.mjs           游戏数据、角色构建（装备、房屋、公会、成就、区域和社区加成）
+    game.mjs           游戏数据、角色构建（装备、房屋、公会、成就、区域、社区加成和卷轴）
     engine-core.mjs    队伍配置 → 引擎输入
     import.mjs         游戏数据 → 队伍配置
     metrics.mjs        利润计算
