@@ -8,5 +8,8 @@ body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; ba
 .num { font-variant-numeric: tabular-nums; text-align: right; }
 .good { color: var(--el-color-success); }
 .bad { color: var(--el-color-danger); }
+/* what an optimizer changed */
+.changed { color: var(--el-color-warning); font-weight: 600; }
+.el-table .changed-row > td.el-table__cell { background: var(--el-color-warning-light-9); }
 .el-card { margin-bottom: 12px; }
 .kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 8px; font-size: 13px; }

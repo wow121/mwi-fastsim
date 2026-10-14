@@ -53,6 +53,17 @@ function params() {
     add: Object.fromEntries(Object.entries(added).map(([k, o]) => [k, { ...o }])),
   }
 }
+// result vs the configuration it started from (slot by slot): highlight what the optimizer changed
+const trigKey = (mem, h) => (mem?.triggerMap && Object.prototype.hasOwnProperty.call(mem.triggerMap, h) ? JSON.stringify(mem.triggerMap[h].map(c => [c.dependencyHrid, c.conditionHrid, c.comparatorHrid, Number(c.value || 0)])) : "default")
+function abilityChanged(i, k) {
+  const a = result.value.members[i]?.abilities[k], b = members.value[i]?.abilities[k]
+  return (a?.abilityHrid || "") !== (b?.abilityHrid || "") || (!!a?.abilityHrid && a.level !== b?.level)
+}
+function triggerChanged(i, k) {
+  const h = result.value.members[i]?.abilities[k]?.abilityHrid
+  return !!h && trigKey(result.value.members[i], h) !== trigKey(members.value[i], h)
+}
+const changeCount = i => (result.value.members[i]?.abilities || []).filter((_, k) => abilityChanged(i, k) || triggerChanged(i, k)).length
 const fmtObj = v => (result.value?.objective === "xp" ? `${int(v)} 经验/小时` : `${perDay(v)}/天`)
 const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : result.value?.objective === "profitMid" ? "profitMidpointPerHour" : "profitPerHour"))
 </script>
@@ -116,11 +127,19 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
       <div class="grid">
         <div v-for="(m, i) in result.members" :key="m.id">
           <b>{{ m.name }}</b>
-          <el-table :data="m.abilities" size="small">
+          <span v-if="!result.unchanged" :class="changeCount(i) ? 'changed' : 'muted'"> · {{ changeCount(i) ? `改了 ${changeCount(i)} 处` : "不变" }}</span>
+          <el-table :data="m.abilities" size="small" :row-class-name="({ rowIndex }) => (!result.unchanged && (abilityChanged(i, rowIndex) || triggerChanged(i, rowIndex)) ? 'changed-row' : '')">
             <el-table-column label="槽位" width="70"><template #default="{ $index }">{{ $index === 0 ? "特殊" : $index }}</template></el-table-column>
-            <el-table-column label="优化后"><template #default="{ row }">{{ row.abilityHrid ? `${abilityName(row.abilityHrid)} Lv.${row.level}` : "—" }}</template></el-table-column>
+            <el-table-column label="优化后"><template #default="{ row, $index }"><span :class="!result.unchanged && abilityChanged(i, $index) ? 'changed' : ''">{{ row.abilityHrid ? `${abilityName(row.abilityHrid)} Lv.${row.level}` : "—" }}</span></template></el-table-column>
             <el-table-column label="原来"><template #default="{ $index }">{{ members[i]?.abilities[$index]?.abilityHrid ? abilityName(members[i].abilities[$index].abilityHrid) : "—" }}</template></el-table-column>
-            <el-table-column label="触发"><template #default="{ row }">{{ row.abilityHrid ? triggerText(m, row.abilityHrid) : "" }}</template></el-table-column>
+            <el-table-column label="触发">
+              <template #default="{ row, $index }">
+                <template v-if="row.abilityHrid">
+                  <span :class="!result.unchanged && triggerChanged(i, $index) ? 'changed' : ''">{{ triggerText(m, row.abilityHrid) }}</span>
+                  <div v-if="!result.unchanged && triggerChanged(i, $index) && !abilityChanged(i, $index)" class="muted" style="text-decoration: line-through">{{ triggerText(members[i], row.abilityHrid) }}</div>
+                </template>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
       </div>

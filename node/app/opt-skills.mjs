@@ -137,6 +137,7 @@ export async function optimizeSkills(ev, params, api) {
     api.log("当前技能配置已是最好")
     return { members: clone(params.members), history, chosen: {}, baseline: baseline.mean, final: baseline.mean, improvement: { mean: 0, se: 0, low: 0, high: 0 }, objective, unchanged: true }
   }
+  restoreDefaults(m, members, params.members)
   api.log(`完成：${fmt(final.value, objective)}（基准 ${fmt(baseline.value, objective)}，提升 ${fmt(cmp.mean, objective)} ± ${fmt(1.96 * cmp.se, objective)}）`)
   return { members, history, chosen, baseline: baseline.mean, final: final.mean, improvement: cmp, objective }
 }
@@ -289,6 +290,17 @@ function groupLabels(changes) {
   const out = {}
   for (const c of changes) out[c.hrid] = out[c.hrid] ? `${out[c.hrid]}；${c.label}` : c.label
   return out
+}
+
+/** Trigger entries the search only wrote out (materialize) and left at the game default go back to "not set". */
+function restoreDefaults(m, members, original) {
+  members.forEach((c, i) => {
+    for (const [h, conds] of Object.entries(c.triggerMap || {})) {
+      if (Object.prototype.hasOwnProperty.call(original[i]?.triggerMap || {}, h)) continue
+      const def = (m.$e.abilityDetailMap[h]?.defaultCombatTriggers || []).map(strip)
+      if (JSON.stringify(conds.map(strip)) === JSON.stringify(def)) delete c.triggerMap[h]
+    }
+  })
 }
 
 function fmt(v, objective) {
