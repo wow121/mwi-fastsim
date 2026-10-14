@@ -148,9 +148,9 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
     <el-card v-if="result?.history?.length">
       <template #header><b>搜索过程</b> <span class="muted">每轮每名成员的前 5 名；带「复核」的是最有希望的方案（最好的预设组合，和在当前触发上逐步增删条件、微调阈值的结果），换一组随机战斗、用 2 倍时长 × 4 倍次数复核过，复核结果明显更好（± 范围整个大于 0）才采用</span></template>
       <div v-for="(h, k) in result.history" :key="k" style="margin-bottom: 8px">
-        <div class="muted">第 {{ h.round }} 轮 · {{ members[h.member]?.name }}</div>
+        <div class="muted">{{ h.title || `第 ${h.round} 轮 · ${members[h.member]?.name}` }}</div>
         <el-table :data="h.top" size="small">
-          <el-table-column label="技能组"><template #default="{ row }">{{ row.abilities.join(" / ") }}<span v-if="row.tuned" class="muted">（当前触发改进：{{ row.tuned.join("，") }}）</span></template></el-table-column>
+          <el-table-column label="技能组"><template #default="{ row }">{{ row.abilities.join(h.team ? "；" : " / ") }}<span v-if="row.tuned" class="muted">（当前触发改进：{{ row.tuned.join("，") }}）</span></template></el-table-column>
           <el-table-column label="目标值" width="150" align="right"><template #default="{ row }">{{ fmtObj(row.value) }}</template></el-table-column>
           <el-table-column label="对比当前" width="260" align="right">
             <template #default="{ row }">

@@ -55,6 +55,7 @@ export async function optimizeSkills(ev, params, api) {
   const optimize = params.optimize?.length ? params.optimize : members.map((_, i) => i)
   const history = []
   const chosen = {}
+  const options = {} // member index -> its best configurations of the latest round, for the team cross check
   const common = { target, extra, objective, signal: api.signal }
   // 24 h x 32 runs, paired: with 8 runs the noise (deaths come in chains) often hid real gains
   const finalSeeds = seedList(99173, 32)
@@ -118,6 +119,7 @@ export async function optimizeSkills(ev, params, api) {
         best = confirmed[0]
         ranked = [...confirmed, ...ranked.filter(r => r.key !== pick?.key)]
       }
+      options[idx] = ranked.slice(0, 6).map(r => ({ cfg: r.members[idx], label: r.tuned ? `当前技能，触发改为 ${r.tuned.map(c => c.label).join("，")}` : names(m, r.members[idx]).join(" / ") }))
       history.push({ round, member: idx, top: ranked.slice(0, 5).map(r => ({ abilities: names(m, r.members[idx]), presets: r.presets, value: r.value, deaths: r.mean.deathsPerHour, vs: r.vsIncumbent, confirmed: r.confirmed, tuned: r.tuned?.map(c => c.label) })) })
       if (best.confirmed && best.vsIncumbent?.clearlyBetter) {
         members = best.members
@@ -128,6 +130,45 @@ export async function optimizeSkills(ev, params, api) {
       api.partial({ members, history, baseline: baseline.mean, objective })
     }
     if (!changed) break
+  }
+
+  // team cross check: each member's top configurations (the current one plus up to 2 others) combined across the
+  // team and simulated together, for changes that only pay off together (e.g. who casts the shared debuff)
+  if (optimize.length >= 2) {
+    const key = c => JSON.stringify({ a: c.abilities, t: c.triggerMap })
+    const lists = optimize.map(idx => {
+      const seen = new Set()
+      return [{ cfg: members[idx], label: "当前" }, ...(options[idx] || [])].filter(o => !seen.has(key(o.cfg)) && seen.add(key(o.cfg))).slice(0, 3)
+    })
+    if (lists.some(l => l.length > 1)) {
+      const product = lists.reduce((acc, l) => acc.flatMap(a => l.map(o => [...a, o])), [[]])
+      const cands = product.map((combo, k) => {
+        const mem = clone(members)
+        combo.forEach((o, j) => (mem[optimize[j]] = clone(o.cfg)))
+        return { key: `x${k}`, members: mem, combo, incumbent: k === 0 }
+      })
+      api.log(`全队交叉组合：每人前 ${Math.max(...lists.map(l => l.length))} 名方案互相组合，共 ${cands.length} 种`)
+      let ranked = await halving(ev, cands, { ...common, stages, seedBase: 6000, onStage: (s, d, t) => api.progress(d, t, `全队交叉组合 · 阶段 ${s + 1}/${stages.length}`) })
+      const cur = ranked.find(r => r.incumbent)
+      const pick = ranked.filter(r => !r.incumbent).sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)[0]
+      const comboText = r => r.combo.map((o, j) => `${members[optimize[j]].name || `队员${optimize[j] + 1}`}：${o.label}`)
+      if (pick) {
+        const last = stages.at(-1)
+        const confirm = { hours: last.hours * 2, seeds: last.seeds * 4 }
+        api.progress(0, 2, `全队交叉组合 · 复核（${confirm.hours} 小时 × ${confirm.seeds} 次）`)
+        const check = await halving(ev, [{ ...cur, key: "cur" }, { ...pick, key: "best", incumbent: false }], { ...common, stages: [confirm], seedBase: 6500 })
+        const best = { ...check.find(r => r.key === "best"), confirmed: confirm }
+        ranked = [best, ...ranked.filter(r => r.key !== pick.key)]
+        history.push({ title: "全队交叉组合", team: true, top: ranked.slice(0, 5).map(r => ({ abilities: comboText(r), value: r.value, deaths: r.mean.deathsPerHour, vs: r.vsIncumbent, confirmed: r.confirmed })) })
+        const changedNames = best.combo.map((o, j) => (o.label === "当前" ? null : optimize[j])).filter(x => x != null)
+        if (best.vsIncumbent.clearlyBetter) {
+          members = best.members
+          for (const idx of changedNames) chosen[idx] ||= {}
+          api.log(`  → 采用 ${comboText(best).filter((_, j) => best.combo[j].label !== "当前").join("；")}（+${fmt(best.vsIncumbent.mean, objective)}）`)
+        } else api.log(`  → 不换（最有希望的 ${comboText(best).join("；")} 复核 ${best.vsIncumbent.mean >= 0 ? "+" : ""}${fmt(best.vsIncumbent.mean, objective)} ± ${fmt(1.96 * best.vsIncumbent.se, objective)}，不显著）`)
+        api.partial({ members, history, baseline: baseline.mean, objective })
+      }
+    }
   }
 
   const final = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
