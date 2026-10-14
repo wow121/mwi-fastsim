@@ -287,8 +287,9 @@ async function confirmAdaptive(ev, common, stages, cur, challengers, { seedBase,
   return challengers.map((c, k) => ({ ...c, incumbent: false, value: avg(vals[k + 1]), mean: { ...c.mean, deathsPerHour: avg(deaths[k + 1]) }, vsIncumbent: vs(k + 1), confirmed: { hours, seeds: vals[k + 1].length } }))
 }
 
-/** Numeric thresholds of a member's current ability triggers (slots 1-4) as tuning items. A value of 1 or less
- *  on a HP / MP condition means "always" and is left alone. */
+/** Numeric thresholds of a member's current ability triggers (slots 1-4) as tuning items. Enemy HP is tuned on the
+ *  zone's grid even at 1 (the game's presets write "HP >= 1" as a placeholder, and the search adds no second HP
+ *  condition of the same kind); any other HP / MP condition at 1 or less means "always" and is left alone. */
 function currentItems(m, cfg, scale) {
   const maps = m.$e
   const out = []
@@ -301,7 +302,7 @@ function currentItems(m, cfg, scale) {
       const cond = String(c.conditionHrid || "")
       if (cond.endsWith("number_of_active_units")) out.push({ hrid: h, index, coarse: [1, 2, 3, 4], fine: () => [] })
       else if (cond.endsWith("percentage")) out.push({ hrid: h, index, coarse: [v - 20, v - 10, v + 10, v + 20], fine: x => [x - 5, x + 5], percentage: true })
-      else if (v > 1 && cond.endsWith("/current_hp") && !String(c.dependencyHrid).endsWith("/self") && !String(c.dependencyHrid).endsWith("/all_allies")) {
+      else if (cond.endsWith("/current_hp") &&!String(c.dependencyHrid).endsWith("/self") && !String(c.dependencyHrid).endsWith("/all_allies")) {
         // enemy HP: the zone's grid (not multiples of the old value)
         const hv = hpValues(scale, c.dependencyHrid)
         out.push({ hrid: h, index, coarse: hv.coarse, fine: x => [x - 2 * hv.step(x), x - hv.step(x), x + hv.step(x), x + 2 * hv.step(x)] })
