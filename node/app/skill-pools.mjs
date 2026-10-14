@@ -138,12 +138,16 @@ export function presetVariants(m, group, checkedOnly = true) {
   return out
 }
 
-/** Pool of a member: class, pool abilities with learned levels, unlocked slots. */
-export function memberPool(m, cfg) {
+const MAGES = ["water", "fire", "nature"]
+
+/** Pool of a member: class, pool abilities with learned levels, unlocked slots. With `crossElement`, a mage's pool
+ *  also has the other two elements' abilities (only learned ones end up being tried). */
+export function memberPool(m, cfg, { crossElement = false } = {}) {
   const cls = classOf(m, cfg.equipment?.weapon?.itemHrid)
   const levels = { ...(cfg.abilityLevelMap || {}) }
   for (const a of cfg.abilities || []) if (a?.abilityHrid) levels[a.abilityHrid] = Math.max(Number(levels[a.abilityHrid] || 0), Number(a.level || 1))
-  const pool = cls ? POOLS[cls].map(A).map(h => ({ hrid: h, level: Number(levels[h] || 0), learned: Number(levels[h] || 0) > 0 })) : []
+  const names = cls && crossElement && MAGES.includes(cls) ? [...new Set([POOLS[cls], ...MAGES.map(c => POOLS[c])].flat())] : cls ? POOLS[cls] : []
+  const pool = names.map(A).map(h => ({ hrid: h, level: Number(levels[h] || 0), learned: Number(levels[h] || 0) > 0 }))
   return { cls, className: cls ? CLASS_NAMES[cls] : "未识别", pool, slots: normalSlots(m, cfg.levels?.intelligence) }
 }
 

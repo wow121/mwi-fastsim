@@ -22,12 +22,13 @@ export const DEFAULT_STAGES = [
 ]
 
 /**
- * candidates: [{ key, label, members, incumbent? }]; the incumbent always survives.
+ * candidates: [{ key, label, members, incumbent? }]; the incumbent always survives. `onScored(stage, sorted)` sees
+ * every stage's scores (e.g. the first stage's ranking of all candidates).
  * Returns candidates of the last stage sorted by objective, each with { value, mean, perSeed,
  * vsIncumbent }.
  */
 export async function halving(ev, candidates, opt) {
-  const { target, extra, objective, seedBase = 20260923, signal, stages = DEFAULT_STAGES, onStage, concurrency = 48 } = opt
+  const { target, extra, objective, seedBase = 20260923, signal, stages = DEFAULT_STAGES, onStage, onScored, concurrency = 48 } = opt
   let alive = candidates
   let scored = []
   for (let s = 0; s < stages.length; s++) {
@@ -42,6 +43,7 @@ export async function halving(ev, candidates, opt) {
       return { ...c, value: r.value, mean: r.mean, perSeed: r.perSeed }
     })
     scored.sort((a, b) => b.value - a.value || a.mean.deathsPerHour - b.mean.deathsPerHour)
+    onScored?.(s, scored)
     if (s === stages.length - 1) break
     const n = typeof st.keep === "number" && st.keep < 1 ? Math.ceil(scored.length * st.keep) : st.keep
     const k = Math.max(st.min || 1, n)

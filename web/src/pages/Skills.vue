@@ -15,6 +15,8 @@ const objective = ref("profit")
 const optimize = ref(members.value.map((_, i) => i))
 const rounds = ref(2)
 const allPresets = ref(false)
+const crossElement = ref(false)
+const consumables = ref(false)
 const pools = ref([])
 onMounted(async () => {
   pools.value = await call("POST", "/api/skill-pools", { members: members.value })
@@ -49,7 +51,7 @@ function params() {
   if (!members.value.length) return ElMessage.warning("先在“队伍”页勾选出战成员")
   return {
     members: members.value, target: target.value, extra: extra.value, objective: objective.value,
-    optimize: optimize.value, rounds: rounds.value, allPresets: allPresets.value, stages: PRESETS[precision.value],
+    optimize: optimize.value, rounds: rounds.value, allPresets: allPresets.value, crossElement: crossElement.value, consumables: consumables.value, stages: PRESETS[precision.value],
     exclude: Object.fromEntries(Object.entries(excluded).map(([k, s]) => [k, [...s]])),
     add: Object.fromEntries(Object.entries(added).map(([k, o]) => [k, { ...o }])),
   }
@@ -91,6 +93,8 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
         </el-radio-group>
         <span class="muted">轮数</span><el-input-number v-model="rounds" :min="1" :max="4" size="small" style="width: 90px" />
         <el-checkbox v-model="allPresets">也试非默认的触发预设（更慢）</el-checkbox>
+        <el-checkbox v-model="crossElement">法师也试其他系学过的技能（更慢）</el-checkbox>
+        <el-checkbox v-model="consumables">完成后接着优化药水触发</el-checkbox>
       </div>
       <div v-for="(m, i) in members" :key="m.id" style="margin-bottom: 10px">
         <el-checkbox :model-value="optimize.includes(i)" @change="v => (optimize = v ? [...optimize, i] : optimize.filter(x => x !== i))">
@@ -126,6 +130,12 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
           <ApplyResult v-if="!result.unchanged" :members="result.members" />
         </div>
       </template>
+      <div v-if="result.consumableChanges?.length" style="margin-bottom: 8px">
+        <b>药水触发</b>
+        <div v-for="(c, k) in result.consumableChanges" :key="k" class="changed">
+          {{ c.team ? c.members.map(j => members[j]?.name).join("、") : members[c.member]?.name }} · {{ c.what }}：{{ c.from ? `${c.from} → ` : "" }}{{ c.to }}
+        </div>
+      </div>
       <div class="grid">
         <div v-for="(m, i) in result.members" :key="m.id">
           <b>{{ m.name }}</b>
@@ -148,7 +158,7 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
     </el-card>
 
     <el-card v-if="result?.history?.length">
-      <template #header><b>搜索过程</b> <span class="muted">每轮每名成员的前 5 名；带「复核」的是最有希望的方案（最好的预设组合，和在当前触发上逐步增删条件、微调阈值的结果），换一组随机战斗、用 2 倍时长 × 4 倍次数复核过，复核结果明显更好（± 范围整个大于 0）才采用</span></template>
+      <template #header><b>搜索过程</b> <span class="muted">每轮每名成员的前 5 名；带「复核」的是最有希望的方案（最好的预设组合，和在当前触发上逐步增删条件、微调阈值的结果），换一组随机战斗、用 2 倍时长复核过（先跑 4 倍次数，分不出好坏的再逐步加到最多 16 倍），复核结果明显更好（± 范围整个大于 0）才采用</span></template>
       <div v-for="(h, k) in result.history" :key="k" style="margin-bottom: 8px">
         <div class="muted">{{ h.title || `第 ${h.round} 轮 · ${members[h.member]?.name}` }}</div>
         <el-table :data="h.top" size="small">
