@@ -47,6 +47,9 @@ const OBJECTIVE_TEXT = {
 }
 const kinds = ref([])
 const tab = ref("")
+// purchase plan: show one member's steps only (plan order kept); "" = everyone
+const planMember = ref("")
+const planSteps = p => (planMember.value ? p.steps.filter(x => x.memberName === planMember.value) : p.steps)
 
 function params() {
   if (!members.value.length) return ElMessage.warning("先在“队伍”页勾选出战成员")
@@ -60,6 +63,7 @@ function params() {
 function onResult(r) {
   result.value = r
   if (!r?.plans?.some(p => String(p.days) === tab.value)) tab.value = String(r?.plans?.at(-1)?.days ?? "")
+  if (!r?.names?.includes(planMember.value)) planMember.value = ""
 }
 const slotNames = computed(() => [...new Set((result.value?.rows || []).map(r => r.slotName))])
 const rows = computed(() => (result.value?.rows || []).filter(r => !kinds.value.length || kinds.value.includes(r.slotName)))
@@ -145,6 +149,13 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
           <span class="muted">当前全队 {{ money(result.profitPerDay) }}/天 · 现金各自 {{ (result.budgets || []).map((b, k) => `${result.names[k]} ${money(b)}`).join("、") }} · 卖出税 {{ (result.tax * 100).toFixed(1) }}% · 镜子 {{ money(result.mirror) }} · 价格按现在的市场价不变 · 期末装备{{ result.keepEnd ? "按买一价" : "按买一价扣税" }}估值</span>
         </div>
       </template>
+      <div class="row" style="margin-bottom: 4px">
+        <span class="muted">角色</span>
+        <el-radio-group v-model="planMember" size="small">
+          <el-radio-button value="">全部</el-radio-button>
+          <el-radio-button v-for="n in result.names" :key="n" :value="n">{{ n }}</el-radio-button>
+        </el-radio-group>
+      </div>
       <el-tabs v-model="tab">
         <el-tab-pane v-for="p in result.plans" :key="p.days" :name="String(p.days)" :label="`${p.days} 天`">
           <el-alert v-if="!p.steps.length" type="info" :closable="false" :title="result.objective === 'score' ? `${p.days} 天内攒的钱不够做任何能提高战斗评分的提升` : `${p.days} 天内没有值得做的提升：任何购买的损耗都超过这段时间多赚的钱`" />
@@ -158,7 +169,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
             <p class="muted">每个角色只用自己的现金和自己的收入买自己的装备。
               <template v-for="x in p.perMember || []" :key="x.name">{{ x.name }}：收入 {{ money(x.startIncome) }} → {{ money(x.income) }}/天，期末现金 {{ money(x.cash) }}<template v-if="x.score != null">，战斗评分 {{ score(x.score) }} → {{ score(x.scoreAfter) }}</template>；</template>
             </p>
-            <el-table :data="p.steps" size="small">
+            <el-table :data="planSteps(p)" size="small" :empty-text="`${planMember} 在这段时间内没有要买的`">
               <el-table-column label="时间" width="100"><template #default="{ row }">{{ day(row.day) }}</template></el-table-column>
               <el-table-column prop="memberName" label="角色" width="90" />
               <el-table-column prop="slotName" label="位置" width="80" />
