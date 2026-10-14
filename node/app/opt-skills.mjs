@@ -5,7 +5,7 @@
 import { halving, DEFAULT_STAGES } from "./search.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
-import { groups, memberPool, presetVariants } from "./skill-pools.mjs"
+import { groups, memberPool, presetVariants, triggerKey } from "./skill-pools.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const strip = c => ({ dependencyHrid: c.dependencyHrid, conditionHrid: c.conditionHrid, comparatorHrid: c.comparatorHrid, value: Number(c.value || 0) })
@@ -16,8 +16,10 @@ const GRID = {
   percentage: [30, 40, 50, 60, 70, 80, 90],
 }
 
-/** Member config with `group` in slots 1..4 (special slot untouched) and the chosen presets. */
-export function applyGroup(members, idx, group, variant, levels) {
+/** Member config with `group` in slots 1..4 (special slot untouched) and the chosen presets. With the game data
+ *  (`m`), an ability whose current trigger is equivalent to the preset keeps the current one (no cosmetic change). */
+export function applyGroup(members, idx, group, variant, levels, m = null) {
+  const prev = members[idx].triggerMap || {}
   const next = clone(members)
   const c = next[idx]
   c.abilities = [c.abilities?.[0] || { abilityHrid: "", level: 1 }]
@@ -27,12 +29,24 @@ export function applyGroup(members, idx, group, variant, levels) {
   const search = []
   for (const h of group) {
     const p = variant[h]
+    const cur = Object.prototype.hasOwnProperty.call(prev, h) ? prev[h] : m ? (m.$e.abilityDetailMap[h]?.defaultCombatTriggers || []) : null
+    if (cur && triggerKey(cur) === triggerKey(p.conditions)) continue // keep the current wording (and its search: none)
     c.triggerMap[h] = p.conditions.map(strip)
     p.conditions.forEach((cd, i) => {
       if (cd.valueMode === "search") search.push({ hrid: h, index: i, kind: cd.searchKind, cond: cd.conditionHrid })
     })
   }
   return { members: next, search, presets: Object.fromEntries(group.map(h => [h, variant[h].label])) }
+}
+
+/** Comparable form of a member's abilities (slots 1-4, in order, with levels) and their triggers. */
+function configKey(m, cfg) {
+  return JSON.stringify((cfg.abilities || []).slice(1).map(a => {
+    const h = a?.abilityHrid
+    if (!h) return null
+    const t = Object.prototype.hasOwnProperty.call(cfg.triggerMap || {}, h) ? cfg.triggerMap[h] : m.$e.abilityDetailMap[h]?.defaultCombatTriggers || []
+    return [h, a.level, triggerKey(t)]
+  }))
 }
 
 function gridFor(s) {
@@ -78,9 +92,14 @@ export async function optimizeSkills(ev, params, api) {
       const levels = { ...Object.fromEntries(mp.pool.map(p => [p.hrid, p.level])), ...added }
       const gs = groups(pool, mp.slots, mp.cls)
       const cands = [{ key: "当前", members: clone(members), incumbent: true, search: [] }]
+      const seen = new Set([configKey(m, members[idx])])
       for (const g of gs)
         for (const v of presetVariants(m, g, !params.allPresets)) {
-          const a = applyGroup(members, idx, g, v, levels)
+          const a = applyGroup(members, idx, g, v, levels, m)
+          // skip variants that are the current configuration (or another candidate) in other words
+          const k = configKey(m, a.members[idx])
+          if (seen.has(k)) continue
+          seen.add(k)
           cands.push({ key: `${g.join("|")}#${JSON.stringify(a.presets)}`, members: a.members, search: a.search, presets: a.presets })
         }
       api.log(`第 ${round} 轮 · ${who}（${mp.className}，${mp.slots} 个技能格，池 ${pool.length} 个）：${cands.length - 1} 个方案`)
@@ -135,7 +154,7 @@ export async function optimizeSkills(ev, params, api) {
   // team cross check: each member's top configurations (the current one plus up to 2 others) combined across the
   // team and simulated together, for changes that only pay off together (e.g. who casts the shared debuff)
   if (optimize.length >= 2) {
-    const key = c => JSON.stringify({ a: c.abilities, t: c.triggerMap })
+    const key = c => configKey(m, c)
     const lists = optimize.map(idx => {
       const seen = new Set()
       return [{ cfg: members[idx], label: "当前" }, ...(options[idx] || [])].filter(o => !seen.has(key(o.cfg)) && seen.add(key(o.cfg))).slice(0, 3)

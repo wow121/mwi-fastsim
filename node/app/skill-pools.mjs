@@ -146,3 +146,15 @@ export function memberPool(m, cfg) {
   const pool = cls ? POOLS[cls].map(A).map(h => ({ hrid: h, level: Number(levels[h] || 0), learned: Number(levels[h] || 0) > 0 })) : []
   return { cls, className: cls ? CLASS_NAMES[cls] : "未识别", pool, slots: normalSlots(m, cfg.levels?.intelligence) }
 }
+
+/** Comparable form of a trigger (list of conditions, all of which must hold): conditions that always hold while
+ *  anyone is fighting (HP >= 1 of anyone, enemy count >= 1) are dropped and the order does not matter, so e.g.
+ *  "targeted enemy HP >= 1", "all enemies HP >= 1" and no condition at all compare equal. */
+export function triggerKey(conds) {
+  const always = c => {
+    const cond = String(c.conditionHrid || ""), cmp = String(c.comparatorHrid || ""), v = Number(c.value || 0)
+    if (!cmp.endsWith("/greater_than_equal") || v > 1) return false
+    return cond.endsWith("/current_hp") || (cond.endsWith("/number_of_active_units") && String(c.dependencyHrid || "").endsWith("/all_enemies"))
+  }
+  return JSON.stringify((conds || []).filter(c => !always(c)).map(c => [c.dependencyHrid, c.conditionHrid, c.comparatorHrid, Number(c.value || 0)]).map(x => JSON.stringify(x)).sort())
+}

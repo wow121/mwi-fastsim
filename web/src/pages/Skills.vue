@@ -6,6 +6,7 @@ import JobRunner from "../components/JobRunner.vue"
 import TargetPicker from "../components/TargetPicker.vue"
 import ExtraBuffs from "../components/ExtraBuffs.vue"
 import ApplyResult from "../components/ApplyResult.vue"
+import { triggerKey } from "@app/skill-pools.mjs"
 
 const members = computed(() => selectedMembers())
 const target = ref(defaultTarget())
@@ -54,7 +55,8 @@ function params() {
   }
 }
 // result vs the configuration it started from (slot by slot): highlight what the optimizer changed
-const trigKey = (mem, h) => (mem?.triggerMap && Object.prototype.hasOwnProperty.call(mem.triggerMap, h) ? JSON.stringify(mem.triggerMap[h].map(c => [c.dependencyHrid, c.conditionHrid, c.comparatorHrid, Number(c.value || 0)])) : "default")
+// equivalent wordings ("targeted enemy HP >= 1" vs "all enemies HP >= 1", condition order) are not a change
+const trigKey = (mem, h) => (mem?.triggerMap && Object.prototype.hasOwnProperty.call(mem.triggerMap, h) ? triggerKey(mem.triggerMap[h]) : "default")
 function abilityChanged(i, k) {
   const a = result.value.members[i]?.abilities[k], b = members.value[i]?.abilities[k]
   return (a?.abilityHrid || "") !== (b?.abilityHrid || "") || (!!a?.abilityHrid && a.level !== b?.level)
