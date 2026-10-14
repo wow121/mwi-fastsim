@@ -1887,6 +1887,7 @@ impl<'a> Sim<'a> {
             Cond::SilenceStatus => {
                 Val::Bool(unit.silenced || unit.silence_expire == Some(self.time))
             }
+            Cond::BossStatus => Val::Bool(matches!(&unit.kind, Kind::Monster { tpl, .. } if tpl.is_boss)),
             _ => return Err("Unknown conditionHrid in trigger".into()),
         })
     }

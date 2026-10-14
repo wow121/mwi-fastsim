@@ -107,7 +107,7 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
           <b>结果</b>
           <span v-if="result.unchanged" class="good">当前配置已是最好，没有找到明显更好的方案（不需要改动）</span>
           <span v-else-if="result.improvement" :class="result.improvement.mean > 0 ? 'good' : ''">
-            {{ fmtObj(result.baseline[objKey]) }} → {{ fmtObj(result.final[objKey]) }}（+{{ fmtObj(result.improvement.mean) }} ± {{ fmtObj(1.96 * result.improvement.se) }}，24 小时 × 8 次配对复核）
+            {{ fmtObj(result.baseline[objKey]) }} → {{ fmtObj(result.final[objKey]) }}（{{ result.improvement.mean >= 0 ? "+" : "" }}{{ fmtObj(result.improvement.mean) }} ± {{ fmtObj(1.96 * result.improvement.se) }}，全队 24 小时 × 32 次配对复核）
           </span>
           <span style="flex: 1" />
           <ApplyResult v-if="!result.unchanged" :members="result.members" />
@@ -127,13 +127,18 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
     </el-card>
 
     <el-card v-if="result?.history?.length">
-      <template #header><b>搜索过程</b> <span class="muted">每轮每名成员的前 5 名</span></template>
+      <template #header><b>搜索过程</b> <span class="muted">每轮每名成员的前 5 名；带「复核」的是最有希望的方案（最好的预设组合，和在当前触发上逐步增删条件、微调阈值的结果），换一组随机战斗、用 2 倍时长 × 4 倍次数复核过，复核结果明显更好（± 范围整个大于 0）才采用</span></template>
       <div v-for="(h, k) in result.history" :key="k" style="margin-bottom: 8px">
         <div class="muted">第 {{ h.round }} 轮 · {{ members[h.member]?.name }}</div>
         <el-table :data="h.top" size="small">
-          <el-table-column label="技能组"><template #default="{ row }">{{ row.abilities.join(" / ") }}</template></el-table-column>
+          <el-table-column label="技能组"><template #default="{ row }">{{ row.abilities.join(" / ") }}<span v-if="row.tuned" class="muted">（当前触发改进：{{ row.tuned.join("，") }}）</span></template></el-table-column>
           <el-table-column label="目标值" width="150" align="right"><template #default="{ row }">{{ fmtObj(row.value) }}</template></el-table-column>
-          <el-table-column label="对比当前" width="200" align="right"><template #default="{ row }">{{ row.vs ? `${row.vs.mean >= 0 ? "+" : ""}${fmtObj(row.vs.mean)}` : "" }}</template></el-table-column>
+          <el-table-column label="对比当前" width="260" align="right">
+            <template #default="{ row }">
+              <template v-if="row.vs"><span :class="row.confirmed && row.vs.clearlyBetter ? 'good' : ''">{{ row.vs.mean >= 0 ? "+" : "" }}{{ fmtObj(row.vs.mean) }}</span><span class="muted"> ± {{ fmtObj(1.96 * row.vs.se) }}</span></template>
+              <span v-if="row.confirmed" class="muted"> · 复核 {{ row.confirmed.hours }}h×{{ row.confirmed.seeds }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="死亡/小时" width="100" align="right"><template #default="{ row }">{{ row.deaths.toFixed(2) }}</template></el-table-column>
         </el-table>
       </div>

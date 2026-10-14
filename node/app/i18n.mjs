@@ -22,6 +22,7 @@ const LABELS = {
   Manapoints: "法力值",
   "Missing Hitpoints": "已损失生命值",
   "Missing Manapoints": "已损失法力值",
+  "Boss Status": "Boss状态", // newer than the game's Chinese name list here
   ">=": "≥",
   "<=": "≤",
 }

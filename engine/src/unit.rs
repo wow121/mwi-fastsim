@@ -128,6 +128,8 @@ pub struct MonsterTemplate {
     pub data_attack_interval: f64,
     /// (ability hrid, level before room scaling, minDifficultyTier)
     pub abilities: Vec<(String, f64, f64)>,
+    /// `isBoss` of the monster data (trigger condition boss_status)
+    pub is_boss: bool,
 }
 
 impl MonsterTemplate {
@@ -192,6 +194,7 @@ impl MonsterTemplate {
             zero_stats,
             data_attack_interval: num(&cd, "attackInterval"),
             abilities,
+            is_boss: m.get("isBoss").and_then(Value::as_bool).unwrap_or(false),
         })
     }
 }

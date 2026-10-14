@@ -394,6 +394,8 @@ pub enum Cond {
     StunStatus,
     BlindStatus,
     SilenceStatus,
+    /// not in the combat-sim site's engine: true for monsters whose data has `isBoss`
+    BossStatus,
     NumberOfActiveUnits,
     NumberOfDeadUnits,
     LowestHpPercentage,
@@ -472,6 +474,7 @@ impl Trigger {
                 "/combat_trigger_conditions/stun_status" => Cond::StunStatus,
                 "/combat_trigger_conditions/blind_status" => Cond::BlindStatus,
                 "/combat_trigger_conditions/silence_status" => Cond::SilenceStatus,
+                "/combat_trigger_conditions/boss_status" => Cond::BossStatus,
                 "/combat_trigger_conditions/number_of_active_units" => Cond::NumberOfActiveUnits,
                 "/combat_trigger_conditions/number_of_dead_units" => Cond::NumberOfDeadUnits,
                 "/combat_trigger_conditions/lowest_hp_percentage" => Cond::LowestHpPercentage,
