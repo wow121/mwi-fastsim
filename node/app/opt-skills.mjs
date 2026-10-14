@@ -34,7 +34,7 @@ export function applyGroup(members, idx, group, variant, levels, m = null) {
     if (cur && triggerKey(cur) === triggerKey(p.conditions)) continue // keep the current wording (and its search: none)
     c.triggerMap[h] = p.conditions.map(strip)
     p.conditions.forEach((cd, i) => {
-      if (cd.valueMode === "search") search.push({ hrid: h, index: i, kind: cd.searchKind, cond: cd.conditionHrid })
+      if (cd.valueMode === "search") search.push({ hrid: h, index: i, kind: cd.searchKind, cond: cd.conditionHrid, dep: cd.dependencyHrid })
     })
   }
   return { members: next, search, presets: Object.fromEntries(group.map(h => [h, variant[h].label])) }
@@ -50,9 +50,50 @@ function configKey(m, cfg) {
   }))
 }
 
-function gridFor(s) {
+/** Max HP of a monster at a difficulty tier, as the engine computes it (unit.rs: stamina level scaled by the tier;
+ *  buffs such as auras left out). */
+function monsterHp(m, hrid, tier) {
+  const cd = m.$e.combatMonsterDetailMap[hrid]?.combatDetails || {}
+  const cs = cd.combatStats || {}
+  const st = (1 + 0.25 * tier) * (Number(cd.staminaLevel || 0) + 20 * tier)
+  return Math.floor((10 * (10 + st) + Number(cs.maxHitpoints || 0)) * (1 + Number(cs.maxHitpointsRatio || 0)))
+}
+
+/** HP scale of a group zone at its tier: { single (average monster), wave (a typical full wave), boss } or null
+ *  (other targets keep the fixed grids). */
+export function zoneHpScale(m, target) {
+  if (target?.kind !== "zone") return null
+  const info = m.$e.actionDetailMap[target.zoneHrid]?.combatZoneInfo
+  const sp = info?.fightInfo?.randomSpawnInfo
+  if (!sp || info.isDungeon) return null
+  const tier = Number(target.difficultyTier || 0)
+  const spawns = (sp.spawns || []).filter(x => Number(x.difficultyTier || 0) <= tier)
+  if (!spawns.length) return null
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length
+  const single = avg(spawns.map(x => monsterHp(m, x.combatMonsterHrid, tier)))
+  const strength = avg(spawns.map(x => Number(x.strength || 0)))
+  const count = Math.max(1, Math.min(Number(sp.maxSpawnCount || 1), strength > 0 ? Math.floor(Number(sp.maxTotalStrength || 0) / strength) : 1))
+  const bosses = (info.fightInfo.bossSpawns || []).map(x => monsterHp(m, x.combatMonsterHrid, tier))
+  return { single, wave: single * count, boss: bosses.length ? Math.max(...bosses) : 0 }
+}
+
+const r50 = v => Math.max(1, Math.round(v / 50) * 50)
+
+/** Coarse and fine HP thresholds for an enemy HP condition: fractions of a single monster (targeted enemy) or of a
+ *  full wave (all enemies, summed), from the zone's monsters; the fixed grid when the scale is unknown. */
+function hpValues(scale, dep, few = false) {
+  if (!scale) return { coarse: few ? [1000, 3000, 8000] : GRID.enemyHp, step: v => v * 0.15 }
+  const target = String(dep).endsWith("/targeted_enemy")
+  const base = target ? scale.single : scale.wave
+  const fr = few ? [0.25, 0.5, 0.8] : [0.1, 0.25, 0.4, 0.55, 0.7, 0.85]
+  const extra = few ? [] : target ? [0.5, 0.8].map(f => f * scale.boss) : [0.5, 1].map(f => f * scale.single)
+  return { coarse: [...new Set([...fr.map(f => f * base), ...extra].filter(v => v > 0).map(r50))].sort((a, b) => a - b), step: () => base * 0.05 }
+}
+
+function gridFor(s, scale) {
   if (s.kind === "percentage") return GRID.percentage
-  return s.cond.endsWith("missing_hp") ? GRID.missingHp : GRID.enemyHp
+  if (s.cond.endsWith("missing_hp")) return GRID.missingHp
+  return hpValues(scale, s.dep).coarse
 }
 
 const names = (m, cfg) => (cfg.abilities || []).map(a => (a?.abilityHrid ? zh(m.$e, a.abilityHrid) : "—"))
@@ -72,6 +113,9 @@ export async function optimizeSkills(ev, params, api) {
   const history = []
   const chosen = {}
   const options = {} // member index -> its best configurations of the latest round, for the team cross check
+  // HP thresholds follow the target's monsters (a full wave / a single monster at this tier), not old values
+  const scale = zoneHpScale(m, target)
+  if (scale) api.log(`怪物血量（阈值按这个搜）：单只约 ${Math.round(scale.single)}，一波约 ${Math.round(scale.wave)}${scale.boss ? `，Boss ${scale.boss}` : ""}`)
   const common = { target, extra, objective, signal: api.signal }
   // 24 h x 32 runs, paired: with 8 runs the noise (deaths come in chains) often hid real gains
   const finalSeeds = seedList(99173, 32)
@@ -115,11 +159,15 @@ export async function optimizeSkills(ev, params, api) {
       // difference), not just the highest mean: with deaths in the mix the top mean is often the noisiest one
       const cur = ranked.find(r => r.incumbent)
       const pick = ranked.filter(r => !r.incumbent).sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)[0]
-      const tuneCtx = { ev, common, stages, idx, who, api, m }
+      const tuneCtx = { ev, common, stages, idx, who, api, m, scale }
       const challengers = []
       // 1) the best preset group, with its "search" thresholds tuned
       if (pick) {
-        const items = (pick.search || []).map(x => ({ hrid: x.hrid, index: x.index, coarse: gridFor(x), percentage: x.kind === "percentage", fine: v => (x.kind === "percentage" ? [v - 5, v + 5] : [v * 0.75, v * 0.9, v * 1.1, v * 1.25]) }))
+        const items = (pick.search || []).map(x => {
+          const enemyHp = x.kind !== "percentage" && !x.cond.endsWith("missing_hp")
+          const st = enemyHp ? hpValues(scale, x.dep).step : null
+          return { hrid: x.hrid, index: x.index, coarse: gridFor(x, scale), percentage: x.kind === "percentage", fine: v => (x.kind === "percentage" ? [v - 5, v + 5] : st ? [v - 2 * st(v), v - st(v), v + st(v), v + 2 * st(v)] : [v * 0.75, v * 0.9, v * 1.1, v * 1.25]) }
+        })
         challengers.push({ ...(await tune(tuneCtx, { ...pick }, items)).best, key: "best", incumbent: false })
       }
       // 2) the current abilities and trigger conditions, improved step by step: add / remove one condition at a
@@ -241,7 +289,7 @@ async function confirmAdaptive(ev, common, stages, cur, challengers, { seedBase,
 
 /** Numeric thresholds of a member's current ability triggers (slots 1-4) as tuning items. A value of 1 or less
  *  on a HP / MP condition means "always" and is left alone. */
-function currentItems(m, cfg) {
+function currentItems(m, cfg, scale) {
   const maps = m.$e
   const out = []
   for (const a of (cfg.abilities || []).slice(1)) {
@@ -253,7 +301,11 @@ function currentItems(m, cfg) {
       const cond = String(c.conditionHrid || "")
       if (cond.endsWith("number_of_active_units")) out.push({ hrid: h, index, coarse: [1, 2, 3, 4], fine: () => [] })
       else if (cond.endsWith("percentage")) out.push({ hrid: h, index, coarse: [v - 20, v - 10, v + 10, v + 20], fine: x => [x - 5, x + 5], percentage: true })
-      else if (v > 1) out.push({ hrid: h, index, coarse: [v * 0.25, v * 0.5, v * 0.75, v * 1.5, v * 2, v * 3], fine: x => [x * 0.85, x * 1.15] })
+      else if (v > 1 && cond.endsWith("/current_hp") && !String(c.dependencyHrid).endsWith("/self") && !String(c.dependencyHrid).endsWith("/all_allies")) {
+        // enemy HP: the zone's grid (not multiples of the old value)
+        const hv = hpValues(scale, c.dependencyHrid)
+        out.push({ hrid: h, index, coarse: hv.coarse, fine: x => [x - 2 * hv.step(x), x - hv.step(x), x + hv.step(x), x + 2 * hv.step(x)] })
+      } else if (v > 1) out.push({ hrid: h, index, coarse: [v * 0.25, v * 0.5, v * 0.75, v * 1.5, v * 2, v * 3], fine: x => [x * 0.85, x * 1.15] })
     })
   }
   return out
@@ -297,7 +349,7 @@ const cnd = (dep, c, cmp, value = 0) => ({ dependencyHrid: DEP(dep), conditionHr
 const CMP_TEXT = { greater_than_equal: "≥", less_than_equal: "≤", is_active: "生效", is_inactive: "未生效" }
 
 /** Conditions tried as additions to an ability's trigger (coarse values; the thresholds are tuned afterwards). */
-function conditionLibrary(m, hrid, selfBuff) {
+function conditionLibrary(m, hrid, selfBuff, scale) {
   const own = hrid.split("/").at(-1)
   const out = []
   for (const v of [300, 600, 1000]) out.push(cnd("self", "current_mp", "greater_than_equal", v))
@@ -307,7 +359,7 @@ function conditionLibrary(m, hrid, selfBuff) {
   out.push(cnd("targeted_enemy", "boss_status", "is_active"), cnd("targeted_enemy", "boss_status", "is_inactive"))
   for (const v of [2, 3]) out.push(cnd("all_enemies", "number_of_active_units", "greater_than_equal", v))
   out.push(cnd("all_enemies", "number_of_active_units", "less_than_equal", 1))
-  for (const v of [1000, 3000, 8000]) out.push(cnd("all_enemies", "current_hp", "greater_than_equal", v), cnd("targeted_enemy", "current_hp", "greater_than_equal", v))
+  for (const dep of ["all_enemies", "targeted_enemy"]) for (const v of hpValues(scale, DEP(dep), true).coarse) out.push(cnd(dep, "current_hp", "greater_than_equal", v))
   for (const v of [20, 50]) out.push(cnd("all_enemies", "lowest_hp_percentage", "greater_than_equal", v))
   return out
 }
@@ -333,7 +385,7 @@ function materialize(m, members, idx) {
 
 /** Configurations one change away: one condition added to or removed from one ability's trigger (at most 4), or
  *  two neighbouring abilities swapped. Additions also carry `add: { hrid, cond }` so that two can be combined. */
-function neighbors(m, members, idx) {
+function neighbors(m, members, idx, scale) {
   const cfg = members[idx]
   const out = []
   const slots = cfg.abilities || []
@@ -356,7 +408,7 @@ function neighbors(m, members, idx) {
     })
     if (conds.length >= 4) continue
     const selfBuff = conds.some(c => c.dependencyHrid === DEP("self") && c.conditionHrid === CND(h.split("/").at(-1)))
-    for (const c of conditionLibrary(m, h, selfBuff)) {
+    for (const c of conditionLibrary(m, h, selfBuff, scale)) {
       if (conds.some(x => sameKind(x, c))) continue
       const mem = clone(members)
       mem[idx].triggerMap[h] = [...conds.map(strip), strip(c)]
@@ -390,7 +442,7 @@ async function improveCurrent(ctx, cur, round) {
   let state = { ...cur, members: materialize(m, cur.members, idx), incumbent: false, presets: {} }
   const changes = []
   for (let step = 1; step <= 3; step++) {
-    const nb = neighbors(m, state.members, idx)
+    const nb = neighbors(m, state.members, idx, ctx.scale)
     if (!nb.length) break
     const cands = [{ ...state, key: "state", incumbent: true }, ...nb.map((n, k) => ({ ...state, key: `n${k}`, members: n.members, change: n, incumbent: false }))]
     let first = []
@@ -416,7 +468,7 @@ async function improveCurrent(ctx, cur, round) {
     for (const c of top.change.pair || [top.change]) changes.push({ hrid: c.hrid, label: c.label })
     state = { ...top, incumbent: false }
   }
-  const t = await tune(ctx, state, currentItems(m, state.members[idx]))
+  const t = await tune(ctx, state, currentItems(m, state.members[idx], ctx.scale))
   return { best: t.best, changes: [...changes, ...t.changes] }
 }
 
