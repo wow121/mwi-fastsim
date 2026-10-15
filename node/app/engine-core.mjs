@@ -1,7 +1,7 @@
 // Compiles a worker payload ("start_simulation" message) into the scenario format the Rust
 // engine runs, from the game data (`game`, see game.mjs). No Node APIs: shared by the local server
 // and the browser build.
-import { ABILITY_ALIASES, EXTRA_ABILITIES, extraBuffs, generatePermanentBuffs, labyrinthBuffs, labyrinthUpgradeBuffs, playerFromDTO, zoneBuffs } from "./game.mjs"
+import { ABILITY_ALIASES, EXTRA_ABILITIES, extraBuffs, sealBuffs, generatePermanentBuffs, labyrinthBuffs, labyrinthUpgradeBuffs, playerFromDTO, zoneBuffs } from "./game.mjs"
 
 const PLAYER_KEYS = [
   "stabAccuracy", "slashAccuracy", "smashAccuracy", "rangedAccuracy", "magicAccuracy",
@@ -110,7 +110,9 @@ export function compilePayload(game, r) {
   const players = (r.players || []).map((h) => {
     const H = playerFromDTO(game, h)
     H.zoneBuffs = zone?.buffs || (lab ? lab.buffs.concat(labyrinthUpgradeBuffs(h.labyrinthUpgrades)) : [])
-    H.extraBuffs = extra
+    // scrolls of this member only (scroll value analysis), on top of the team's
+    const own = lab ? [] : (h.seals || []).filter(k => !r.extra?.seals?.includes(k))
+    H.extraBuffs = own.length ? extra.concat(sealBuffs(own)) : extra
     H.taskDamageEnabled = task
     return H
   })
