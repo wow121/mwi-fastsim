@@ -173,7 +173,7 @@ function average(list) {
   return out
 }
 
-/** Same interface as Evaluator (evaluate → { mean, perSeed, value }), so the shared searches run on it. */
+/** Same interface as Evaluator (evaluate → { mean, per, perSeed, value }), so the shared searches run on it. */
 export class IronEvaluator {
   constructor(ctx, cfg) {
     this.ctx = ctx // { m, rust, book }
@@ -191,6 +191,6 @@ export class IronEvaluator {
     if (signal?.aborted) throw new Error("cancelled")
     const per = await Promise.all(seeds.map(seed => this.runOnce(members, target, { hours, seed, extra })))
     const mean = average(per)
-    return { mean, perSeed: per.map(p => this.metrics.value(p)), value: this.metrics.value(mean) }
+    return { mean, per, perSeed: per.map(p => this.metrics.value(p)), value: this.metrics.value(mean) }
   }
 }
