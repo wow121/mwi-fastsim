@@ -4,6 +4,8 @@
 export const HOUR = 3600e9
 const PLAYERS = new Set(["player1", "player2", "player3", "player4", "player5"])
 const KEY_ARTISAN = 0.897
+// A clear rewards 5 chest rolls shared by the party: each member gets 5 / party size × (1 + drop quantity).
+const DUNGEON_CHESTS = 5
 const CHESTS = ["/items/small_treasure_chest", "/items/medium_treasure_chest", "/items/large_treasure_chest"]
 
 const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
@@ -99,9 +101,9 @@ export function dungeonInfo(maps, r) {
   return z?.combatZoneInfo?.isDungeon === true ? z.combatZoneInfo.dungeonInfo : null
 }
 
+/** Same tier scaling as monster drops: refinement chest T0 0, T1 0.3 × 1.1 = 0.33, T2 0.9 × 1.2 → 1. */
 function chestRate(d, tier) {
-  if (String(d?.itemHrid || "").endsWith("_refinement_chest")) return tier >= 2 ? 1 : tier === 1 ? 1 / 3 : 0
-  return Math.max(0, Math.min(1, num(d?.dropRate, 0) + num(d?.dropRatePerDifficultyTier, 0) * tier))
+  return Math.max(0, Math.min(1, (num(d?.dropRate, 0) + num(d?.dropRatePerDifficultyTier, 0) * tier) * (1 + 0.1 * tier)))
 }
 
 function keyInputs(maps, hrid) {
@@ -133,7 +135,7 @@ function dungeonRewards(maps, r, pid, drops) {
   const qty = 1 + Math.max(0, num(r?.combatDropQuantity?.[pid], 0))
   const out = []
   for (const d of info.rewardDropTable || []) {
-    const amount = (done * chestRate(d, tier) * ((num(d?.minCount, 0) + num(d?.maxCount, 0)) / 2) * qty) / np
+    const amount = (done * chestRate(d, tier) * ((num(d?.minCount, 0) + num(d?.maxCount, 0)) / 2) * qty * DUNGEON_CHESTS) / np
     add(drops, d?.itemHrid, amount)
     if (amount > 0) out.push({ itemHrid: d.itemHrid, amount })
   }
