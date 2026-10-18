@@ -21,7 +21,7 @@ natively behind a small local server or as WebAssembly entirely in the browser. 
 | 刷图推荐 | 所有区域、地下城和难度一起跑，按利润或经验排序；每行可展开看每个成员的数据和主要收入、消耗；结果可以复制成文字或存成图片 |
 | 技能与触发优化 | 整队的技能组合、施放顺序和触发阈值，按职业的可用技能搜索 |
 | 药水触发优化 | 整队的食物、饮料种类（同类食物互斥）和触发条件 |
-| 整队提升规划 | 每人用自己的现金，在 30 天、60 天等规划期内怎么买装备收益最高，算上过渡装备的差价和卖出税；可以把规划期内战斗等级的增长一起算进去（升级后多赚的钱、够等级才能穿的装备），并按每人每项技能每级值多少分阶段安排戴哪个护符 |
+| 整队提升规划 | 每人用自己的现金，在 30 天、60 天等规划期内怎么买装备收益最高，算上过渡装备的差价和卖出税；可以把规划期内战斗等级的增长一起算进去（升级后多赚的钱、够等级才能穿的装备）；可选按每人每项技能每级值多少分阶段安排戴哪个护符 |
 | 目标区域提升 | 想去现在打不动的区域或难度时，装备、技能书、等级、药品怎么提升，最快能做到不死并且比现在赚得多 |
 | 属性价值 | 每项属性（精准、伤害、暴击、施法速度、闪避、护甲、掉落率、技能等级等）每 1 点让全队每天多赚多少、每小时多多少经验；再估算身上每件装备 +1 强化值多少，方便和价格对比算回本 |
 | 卷轴价值 | 某张地图上每种迷宫卷轴（全队开或单人开）每张值多少利润和经验，折合每个迷宫代币，判断用掉还是分解 |
@@ -103,6 +103,7 @@ node/
     opt-*.mjs          各优化器
     gear-cost.mjs      装备获取成本
     routes-core.mjs    接口处理
+    ironcow/           铁牛模式（手搓成本、评估器、导入）
 web/               网页（Vue 3 + Element Plus）
   src/local/         浏览器版的接口实现（IndexedDB + WebAssembly Worker 池）
 userscript/        油猴脚本
@@ -122,7 +123,7 @@ userscript/        油猴脚本
 | `node test-import.mjs` | 游戏数据导入的往返测试 |
 | `node browser-test.mjs` | 用无头 Edge / Chrome 运行浏览器版，和本地服务的结果比对 |
 | `node check-prims.mjs` | Rust 的随机数和 `pow` 与 V8 逐位比对 |
-| `node smoke.mjs` 等 | 接口和各优化器的端到端测试（另有 `test-upgrades.mjs`、`test-goal.mjs`、`test-gear-cost.mjs`、`test-labyrinth.mjs`） |
+| `node smoke.mjs` 等 | 接口和各优化器的端到端测试（另有 `test-upgrades.mjs`、`test-goal.mjs`、`test-gear-cost.mjs`、`test-labyrinth.mjs`、`test-statvalue.mjs`、`test-scrolls.mjs`） |
 
 ## 反馈
 
