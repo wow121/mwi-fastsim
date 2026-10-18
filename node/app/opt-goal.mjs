@@ -8,6 +8,8 @@
 // adds the most profit) per day of income until the goal holds in a long check, else moves on to a
 // later T. Consumables are optimized on the target before and after; finally gear that is not
 // needed is dropped and levels are lowered as far as the goal allows, which gives the finishing time.
+// All of that is decided on one set of runs, so the result is checked on fresh runs at the end (and
+// the trimming undone when it fails there).
 import { hash53 } from "./hash.mjs"
 import { pool } from "./search.mjs"
 import { seedList } from "./evaluator.mjs"
@@ -43,6 +45,8 @@ export async function planGoal(ev, params, api) {
   const quick = { hours: 4, seeds: seedList(4242, 3) }
   const main = { hours: 12, seeds: seedList(9191, 8) }
   const long = { hours: 24, seeds: seedList(55511, 12) }
+  // the final check, on runs no decision has seen
+  const verify = { hours: 24, seeds: seedList(70707, 48) }
   // memoized: attempts at different T share many configurations
   const memo = new Map()
   const run = (mem, t, cfg) => {
@@ -192,11 +196,15 @@ export async function planGoal(ev, params, api) {
       if (api.signal.aborted) throw new Error("cancelled")
       if (curMain.deaths <= maxDeaths + 1e-9 && curMain.profit > ref) {
         const c = stat(await run(config(), goal, long))
-        if (ok(c)) {
-          checked = c
+        // the search ran on `main` and keeps passing `long` by luck now and then (deaths this rare
+        // come from a few runs): a hit has to hold on fresh runs too
+        const v = ok(c) ? stat(await run(config(), goal, verify)) : null
+        if (v && ok(v)) {
+          checked = v
           break
         }
-        curMain = { ...curMain, deaths: Math.max(curMain.deaths, c.deaths), profit: Math.min(curMain.profit, c.profit) }
+        const w = v || c
+        curMain = { ...curMain, deaths: Math.max(curMain.deaths, w.deaths), profit: Math.min(curMain.profit, w.profit) }
       }
       const phase = curMain.deaths > maxDeaths + 1e-9 ? "deaths" : "profit"
       const cands = []
@@ -363,7 +371,8 @@ export async function planGoal(ev, params, api) {
   const checked = hit?.checked || null
 
   let cur = checked || stat(await run(config(), goal, long))
-  const removed = []
+  let removed = []
+  let fresh = null
   if (checked) {
     await tuneConsumables("达标后", async () => {
       const st = stat(await run(config(), goal, long))
@@ -382,6 +391,7 @@ export async function planGoal(ev, params, api) {
       if (ok(st)) cur = st
       return ok(st)
     }
+    const before = { held: [...held], lv: lv.map(x => ({ ...x })) }
     for (const u of undo) {
       if (api.signal.aborted) throw new Error("cancelled")
       if (u.kind === "gear") {
@@ -404,6 +414,18 @@ export async function planGoal(ev, params, api) {
       api.progress(undo.indexOf(u) + 1, undo.length, "精简")
     }
     cur = stat(await run(config(), goal, long))
+    // Every step above (and the greedy search) was decided on the same 12 runs, so what is left
+    // just passes on those: with deaths this rare a few lucky runs decide it. Check the result on
+    // runs no step has seen; if it fails there, go back to the state before trimming.
+    fresh = stat(await run(config(), goal, verify))
+    if (!ok(fresh) && removed.length + optimize.reduce((a, k) => a + SKILLS.filter(s => lv[k][s] !== before.lv[k][s]).length, 0) > 0) {
+      api.log(`精简后的方案换一组随机战斗没达标（死亡 ${fresh.deaths.toFixed(3)}/小时，${M(fresh.profit)}/天），退回精简前`)
+      before.held.forEach((j, s) => { held[s] = j })
+      before.lv.forEach((x, k) => { lv[k] = { ...x } })
+      removed = []
+      fresh = stat(await run(config(), goal, verify))
+    }
+    cur = fresh
   }
 
   // what to do, per member: gear straight from the original state, levels from now
@@ -460,7 +482,7 @@ export async function planGoal(ev, params, api) {
   const reached = ok(cur)
   const readyDays = perMember.some(p => p.days == null) ? null : Math.max(0, ...perMember.map(p => p.days))
   api.log(reached
-    ? `达标：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时；共 ${changes.length} 项，约 ${readyDays == null ? "?" : readyDays.toFixed(1)} 天能全部做完`
+    ? `达标${fresh ? "（换一组没用过的随机战斗验证过）" : ""}：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时；共 ${changes.length} 项，约 ${readyDays == null ? "?" : readyDays.toFixed(1)} 天能全部做完`
     : `没能达标：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时`)
   const levelOptions = members.flatMap((c, k) => SKILLS.filter(s => now.players[k].xp[s] > 0).map(s => ({
     memberName: name(k), skill: SKILL_ZH[s], level: lv0[k][s], perDay: now.players[k].xp[s], days1: levelDays(k, s, lv0[k][s] + 1, 0), days5: levelDays(k, s, lv0[k][s] + 5, 0),

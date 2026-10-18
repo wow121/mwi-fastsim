@@ -1,10 +1,10 @@
 // Marginal value of combat stats (属性价值): for one member at a time, add a step of one stat (or
-// a few skill levels) and simulate against the unchanged team on the same seeds; the paired
-// difference, scaled to one display unit, is what one point of that stat is worth per day.
+// a few skill levels) and simulate against the unchanged team (run over 4× the seeds, see vsBase);
+// the difference, scaled to one display unit, is what one point of that stat is worth per day.
 // The step is larger than one unit so the difference stands out from the noise; the value per
 // unit is the average over the step.
 import { pool } from "./search.mjs"
-import { paired, seedList } from "./evaluator.mjs"
+import { seedList, vsBase } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 import { statGroups, styleOf } from "./stat-groups.mjs"
 
@@ -100,7 +100,11 @@ export async function statValue(ev, params, api) {
   const { m } = ev.ctx
   const maps = m.$e
   const hours = params.hours || 24
-  const seeds = seedList(Number(params.seedBase || 515151), params.seeds || 16)
+  const seedBase = Number(params.seedBase || 515151)
+  const seeds = seedList(seedBase, params.seeds || 16)
+  // the bases over 4× the seeds (the first ones shared): every stat of a member is compared with the
+  // same base, and a change that alters the fights barely pairs with it, so its luck would shift them all
+  const baseSeeds = seedList(seedBase, seeds.length * 4)
   const analyze = (params.analyze?.length ? params.analyze : members.map((_, i) => i)).filter(i => members[i])
   const want = params.groups?.length ? new Set(params.groups) : null
 
@@ -110,20 +114,20 @@ export async function statValue(ev, params, api) {
       if (want ? want.has(grp.id) : grp.on || (grp.id === "healingAmplify" && healer(maps, members[i]))) jobs.push({ i, grp })
   const total = jobs.length + analyze.length + 1
   let done = 0
-  const run = async team => {
-    const r = await ev.evaluate(team, target, { hours, seeds, extra, objective, signal: api.signal })
+  const run = async (team, s = seeds) => {
+    const r = await ev.evaluate(team, target, { hours, seeds: s, extra, objective, signal: api.signal })
     api.progress(++done, total, "模拟")
     return r
   }
   const teamWith = (i, cfg) => members.map((c, j) => (j === i ? cfg : c))
-  const [base, ...bases] = await Promise.all([members, ...analyze.map(i => teamWith(i, withBonus(members[i], EPS)))].map(run))
+  const [base, ...bases] = await Promise.all([members, ...analyze.map(i => teamWith(i, withBonus(members[i], EPS)))].map(t => run(t, baseSeeds)))
   const baseOf = Object.fromEntries(analyze.map((i, k) => [i, bases[k]]))
   const series = (r, k) => r.per.map(p => p[k])
   const rows = await pool(jobs, 16, async ({ i, grp }) => {
     const r = await run(teamWith(i, raised(withBonus(members[i], EPS), grp)))
     const base = baseOf[i]
-    const profit = paired(series(r, "profitPerHour"), series(base, "profitPerHour"))
-    const xp = paired(series(r, "xpPerHour"), series(base, "xpPerHour"))
+    const profit = vsBase(series(r, "profitPerHour"), series(base, "profitPerHour"))
+    const xp = vsBase(series(r, "xpPerHour"), series(base, "xpPerHour"))
     const scale = grp.unit / grp.step
     return {
       member: i, id: grp.id, label: grp.label, kind: grp.kind, keys: grp.keys, levels: grp.levels, step: grp.step, unit: grp.unit, pct: grp.pct,

@@ -2,14 +2,15 @@
 // drink, unlocked empty slots included; one item per food family — yogurt / gummy / donut / cake —
 // and per drink buff),
 // then its trigger (templates with coarse-then-fine thresholds). Coordinate descent over all
-// members and slots; only changes that are clearly better than noise are adopted, and the result
-// is kept only if the final paired review confirms it.
+// members and slots; only changes that are clearly better than noise again on fresh seeds (the
+// winner's own seeds flatter it) are adopted, and the result is kept only if the final review
+// (24 h × 32 runs) confirms it.
 // A new item is tried with its game default trigger and, when it restores the same thing (HP / MP)
 // as the item it replaces, also with that item's trigger: a default that fires too early can make
 // a better item lose before its trigger is ever tuned. Each round starts with team-wide swaps (an
 // item held by several members replaced for all of them at once), whose gain is large enough to
 // show above the noise where a single member's share would not.
-import { halving } from "./search.mjs"
+import { confirmAdaptive, halving } from "./search.mjs"
 import { defaultTriggers, teamDTO, triggersFor } from "./model.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
@@ -117,10 +118,24 @@ export async function optimizeConsumables(ev, params, api) {
     .filter(i => i.categoryHrid === cat && i.consumableDetail?.cooldownDuration > 0 && i.consumableDetail?.usableInActionTypeMap?.["/action_types/combat"])
     .map(i => i.hrid)
     .filter(h => !params.allowItems || params.allowItems.includes(h))]))
-  const finalSeeds = seedList(55511, 8)
+  // 24 h × 32 runs: with 8 the end check was about a coin flip for small gains
+  const finalSeeds = seedList(55511, 32)
   const baseline = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   api.log(`基准：${fmt(baseline.value, objective)}`)
   const changes = []
+  // the last halving stage picks the best on its own seeds, so its number flatters it (the best of
+  // dozens): a winner is taken only once it is confirmed against the current setting on fresh seeds
+  let confirms = 0
+  const confirmed = async (ranked, stages, label) => {
+    const best = ranked[0]
+    if (best.incumbent || !best.vsIncumbent?.clearlyBetter) return null
+    const cur = ranked.find(r => r.incumbent)
+    if (!cur) return best
+    const [c] = await confirmAdaptive(ev, common, stages, cur, [best], { seedBase: 70000 + 97 * confirms++, label: `${label} · 复核`, api })
+    if (c.vsIncumbent.clearlyBetter) return { ...best, vsIncumbent: c.vsIncumbent }
+    api.log(`${label}：最好的候选初看 +${fmt(best.vsIncumbent.mean, objective)}，换一组随机种子复核 ${c.vsIncumbent.mean >= 0 ? "+" : ""}${fmt(c.vsIncumbent.mean, objective)} ± ${fmt(1.96 * c.vsIncumbent.se, objective)}，不显著，不换`)
+    return null
+  }
 
   for (let round = 1; round <= rounds; round++) {
     let changed = false
@@ -156,8 +171,8 @@ export async function optimizeConsumables(ev, params, api) {
             seedBase: 500 * round + (kind === "food" ? 0 : 11) + pool[kind].indexOf(from),
             onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 全队换药`),
           })
-          const best = ranked[0]
-          if (!best.incumbent && best.vsIncumbent?.clearlyBetter) {
+          const best = await confirmed(ranked, teamStages, `${where} · 全队换药`)
+          if (best) {
             members = best.members
             changed = true
             const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED : "")
@@ -199,8 +214,8 @@ export async function optimizeConsumables(ev, params, api) {
               seedBase: 400 * round + idx * 31 + slot + (kind === "food" ? 0 : 7),
               onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 选药`),
             })
-            const best = ranked[0]
-            if (!best.incumbent && best.vsIncumbent?.clearlyBetter) {
+            const best = await confirmed(ranked, itemStages, `${where} · 选药`)
+            if (best) {
               members = best.members
               changed = true
               const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED : "")
@@ -241,8 +256,8 @@ export async function optimizeConsumables(ev, params, api) {
           })
           const fine = refineAround(ranked[0].variant, infos[idx])
           if (fine.length) ranked = await halving(ev, mk([base[0], ranked[0].variant, ...fine]), { ...common, stages: [trigStages[1]], seedBase: 900 + idx })
-          const best = ranked[0]
-          if (!best.incumbent && best.vsIncumbent?.clearlyBetter) {
+          const best = await confirmed(ranked, trigStages, `${where} · ${name} 触发`)
+          if (best) {
             members = best.members
             changed = true
             changes.push({ round, member: idx, kind, slot, what: "触发", from: "", to: `${name}：${best.label}`, gain: best.vsIncumbent })

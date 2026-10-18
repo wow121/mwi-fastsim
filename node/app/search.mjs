@@ -56,3 +56,34 @@ export async function halving(ev, candidates, opt) {
   if (inc) for (const c of scored) c.vsIncumbent = paired(c.perSeed, inc.perSeed)
   return scored
 }
+
+/** Confirmation on fresh seeds at 2x the hours of the last stage, starting with 4x its runs: challengers still
+ *  undecided (the 95% range spans 0 and is wider than 0.5% of the current value) get more runs, doubling up to
+ *  16x. Every challenger is paired with the current configuration on the same seeds.
+ *  Returns the challengers with value, mean (deaths), vsIncumbent and confirmed: { hours, seeds }. */
+export async function confirmAdaptive(ev, common, stages, cur, challengers, { seedBase, label, api }) {
+  const last = stages.at(-1)
+  const hours = last.hours * 2
+  const maxSeeds = last.seeds * 16
+  const all = [cur, ...challengers]
+  const vals = all.map(() => [])
+  const deaths = all.map(() => [])
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length
+  const vs = i => paired(vals[i], vals[0].slice(0, vals[i].length))
+  let open = new Set(challengers.map((_, k) => k + 1))
+  for (let n = 0, want = last.seeds * 4; ; want = Math.min(maxSeeds, want * 2)) {
+    const seeds = seedList(seedBase, want).slice(n)
+    api.progress(0, 1, `${label}（${hours} 小时 × ${want} 次）`)
+    const rs = await Promise.all(all.map((c, i) => (i === 0 || open.has(i) ? ev.evaluate(c.members, common.target, { hours, seeds, extra: common.extra, objective: common.objective, signal: common.signal }) : null)))
+    rs.forEach((r, i) => {
+      if (!r) return
+      vals[i].push(...r.perSeed)
+      deaths[i].push(...r.per.map(p => p.deathsPerHour))
+    })
+    n = want
+    const small = 0.005 * Math.abs(avg(vals[0]))
+    open = new Set([...open].filter(i => { const v = vs(i); return v.low <= 0 && v.high >= 0 && 1.96 * v.se > small }))
+    if (!open.size || want >= maxSeeds) break
+  }
+  return challengers.map((c, k) => ({ ...c, incumbent: false, value: avg(vals[k + 1]), mean: { ...c.mean, deathsPerHour: avg(deaths[k + 1]) }, vsIncumbent: vs(k + 1), confirmed: { hours, seeds: vals[k + 1].length } }))
+}

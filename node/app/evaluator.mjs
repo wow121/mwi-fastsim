@@ -117,6 +117,16 @@ export function unpaired(a, b) {
   return { mean, se, low: mean - 1.96 * se, high: mean + 1.96 * se, clearlyBetter: mean - 1.96 * se > 0 }
 }
 
+/** A series against a base run over more seeds whose first ones are the series' own (seedList(b, n)
+ *  is a prefix of seedList(b, 4n)): paired on the shared seeds or unpaired against the whole base,
+ *  whichever has the smaller error. Pairing wins when the change leaves the fights as they were
+ *  (only loot rolls differ); otherwise the whole base keeps its luck from shifting every comparison. */
+export function vsBase(a, base) {
+  const p = paired(a, base.slice(0, a.length))
+  const u = unpaired(a, base)
+  return p.se <= u.se ? p : u
+}
+
 /** Paired comparison of two per-seed series (same seeds). */
 export function paired(a, b) {
   const d = a.map((x, i) => x - b[i])
