@@ -112,6 +112,16 @@ pub struct Queue {
     /// sorted descending by (time, seq); the next event is at the end
     items: Vec<Entry>,
     next_seq: u64,
+    /// pending auto attacks and cast ends per unit (`has_attack` without scanning the queue)
+    attacks: Vec<u32>,
+}
+
+#[inline]
+fn attack_source(ev: &Ev) -> Option<UnitId> {
+    match *ev {
+        Ev::AutoAttack { source } | Ev::CastEnd { source, .. } => Some(source),
+        _ => None,
+    }
 }
 
 impl Queue {
@@ -123,17 +133,34 @@ impl Queue {
         // first index whose key is smaller than (time, seq): new seq is the largest so far,
         // so equal-time entries already present sort after it in the pop order.
         let pos = self.items.partition_point(|e| e.time > time || (e.time == time && e.seq > seq));
+        if let Some(u) = attack_source(&ev) {
+            if u >= self.attacks.len() {
+                self.attacks.resize(u + 1, 0);
+            }
+            self.attacks[u] += 1;
+        }
         self.items.insert(pos, Entry { time, seq, ev });
     }
 
     #[inline]
     pub fn pop(&mut self) -> Option<Entry> {
-        self.items.pop()
+        let e = self.items.pop()?;
+        if let Some(u) = attack_source(&e.ev) {
+            self.attacks[u] -= 1;
+        }
+        Some(e)
     }
 
     pub fn clear(&mut self) {
         self.items.clear();
         self.next_seq = 0;
+        self.attacks.clear();
+    }
+
+    /// Whether an auto attack or a cast end of `u` is pending.
+    #[inline]
+    pub fn has_attack(&self, u: UnitId) -> bool {
+        self.attacks.get(u).is_some_and(|&n| n > 0)
     }
 
     #[inline]
@@ -151,7 +178,16 @@ impl Queue {
     pub fn clear_matching<F: Fn(&Ev) -> bool>(&mut self, f: F) -> bool {
         let _prof = crate::prof::start("queue.clear_matching");
         let before = self.items.len();
-        self.items.retain(|e| !f(&e.ev));
+        let attacks = &mut self.attacks;
+        self.items.retain(|e| {
+            let remove = f(&e.ev);
+            if remove {
+                if let Some(u) = attack_source(&e.ev) {
+                    attacks[u] -= 1;
+                }
+            }
+            !remove
+        });
         self.items.len() != before
     }
 

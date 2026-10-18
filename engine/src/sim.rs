@@ -193,6 +193,7 @@ pub struct Sim<'a> {
     zone: Option<Zone>,
     lab: Option<Lab>,
     q: Queue,
+    pow14: js::Pow14,
     time: f64,
     all_dead: bool,
     enrage_begin: f64,
@@ -294,6 +295,7 @@ impl<'a> Sim<'a> {
             zone,
             lab,
             q: Queue::default(),
+            pow14: js::Pow14::default(),
             time: 0.0,
             all_dead: false,
             enrage_begin: 0.0,
@@ -611,7 +613,7 @@ impl<'a> Sim<'a> {
 
     fn process(&mut self, ev: Ev) -> Result<(), SimErr> {
         let _prof = crate::prof::start("process(all)");
-        if let Ok(w) = std::env::var("MWI_TRACE_FROM") { let w: f64 = w.parse().unwrap(); if self.time / 1e9 >= w && self.time / 1e9 <= w + 20.0 && !matches!(ev, Ev::RegenTick | Ev::CheckBuffExpiration { .. } | Ev::ConsumableTick { .. }) { eprintln!("WIN t={:.3} ev={:?} enemies={:?} php={:?} ehp={:?}", self.time / 1e9, ev, self.enemies.as_deref().map(|e| e.to_vec()), self.players.iter().map(|&p| self.units[p].d.hp).collect::<Vec<_>>(), self.enemies.as_deref().map(|e| e.iter().map(|&u| self.units[u].d.hp).collect::<Vec<_>>())); } }
+        if let Some(w) = trace_from() { if self.time / 1e9 >= w && self.time / 1e9 <= w + 20.0 && !matches!(ev, Ev::RegenTick | Ev::CheckBuffExpiration { .. } | Ev::ConsumableTick { .. }) { eprintln!("WIN t={:.3} ev={:?} enemies={:?} php={:?} ehp={:?}", self.time / 1e9, ev, self.enemies.as_deref().map(|e| e.to_vec()), self.players.iter().map(|&p| self.units[p].d.hp).collect::<Vec<_>>(), self.enemies.as_deref().map(|e| e.iter().map(|&u| self.units[u].d.hp).collect::<Vec<_>>())); } }
         match ev {
             Ev::CombatStart => self.on_combat_start()?,
             Ev::PlayerRespawn { hrid } => self.on_player_respawn(hrid)?,
@@ -927,7 +929,7 @@ impl<'a> Sim<'a> {
 
     fn kill(&mut self, u: UnitId) {
         let _prof = crate::prof::start("kill");
-        if std::env::var("MWI_TRACE_FROM").is_ok() { eprintln!("KILL t={:.3} u={} player={}", self.time / 1e9, u, self.units[u].is_player); }
+        if trace_from().is_some() { eprintln!("KILL t={:.3} u={} player={}", self.time / 1e9, u, self.units[u].is_player); }
         self.q.clear_for_unit(u);
         let h = self.units[u].hid;
         self.res.add_death(h);
@@ -1041,6 +1043,7 @@ impl<'a> Sim<'a> {
         let _prof = crate::prof::start("process_attack");
         let (e, t) = two(&mut self.units, src, tgt);
         let rng = &mut self.rng;
+        let pow14 = &mut self.pow14;
         let style = eff.map(|x| x.style).unwrap_or(e.style);
         let dtype = eff.map(|x| x.dtype).unwrap_or(e.dtype);
         let (mut o, s, l) = match style {
@@ -1095,8 +1098,8 @@ impl<'a> Sim<'a> {
         if let Some(i) = eff {
             o *= 1.0 + i.bonus_accuracy_ratio;
         }
-        let po = js::pow(o, 1.4);
-        let f = po / (po + js::pow(l, 1.4));
+        let po = pow14.get(o);
+        let f = po / (po + pow14.get(l));
         let mut k = 0.0;
         if style == Style::Ranged {
             k = 0.3 * f;
@@ -1155,8 +1158,8 @@ impl<'a> Sim<'a> {
         }
         let mut ret = 0.0;
         if t.s[RETALIATION] > 0.0 {
-            let pa = js::pow(t.d.acc[IDX_SMASH], 1.4);
-            let ratio = pa / (pa + js::pow(e.d.eva[IDX_SMASH], 1.4));
+            let pa = pow14.get(t.d.acc[IDX_SMASH]);
+            let ratio = pa / (pa + pow14.get(e.d.eva[IDX_SMASH]));
             if ratio > rng.next() {
                 let mut w = e.d.total_armor;
                 if w > 0.0 {
@@ -1371,10 +1374,7 @@ impl<'a> Sim<'a> {
 
     fn add_next_attack(&mut self, e: UnitId) -> Result<(), SimErr> {
         let _prof = crate::prof::start("add_next_attack");
-        if self.q.any(|ev| match ev {
-            Ev::CastEnd { source, .. } | Ev::AutoAttack { source } => *source == e,
-            _ => false,
-        }) {
+        if self.q.has_attack(e) {
             return Ok(());
         }
         let is_player = self.units[e].is_player;
@@ -1665,6 +1665,9 @@ impl<'a> Sim<'a> {
                 .filter(|&t| self.units[t].d.hp > 0.0)
                 .collect();
             for t in alive_p {
+                if !self.has_consumables(t) {
+                    continue;
+                }
                 let en = self.enemies.clone();
                 if self.check_triggers_for_unit(t, &players, en.as_deref())? {
                     e = true;
@@ -1677,6 +1680,9 @@ impl<'a> Sim<'a> {
                     .filter(|&t| self.units[t].d.hp > 0.0)
                     .collect();
                 for t in alive_e {
+                    if !self.has_consumables(t) {
+                        continue;
+                    }
                     let en2 = self.enemies.clone().unwrap_or_default();
                     if self.check_triggers_for_unit(t, &en2, Some(&players))? {
                         e = true;
@@ -1689,6 +1695,13 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// A unit without food or drinks (every monster) has no consumable trigger to check.
+    #[inline]
+    fn has_consumables(&self, u: UnitId) -> bool {
+        let u = &self.units[u];
+        u.food.iter().any(|c| c.is_some()) || u.drinks.iter().any(|c| c.is_some())
+    }
+
     fn check_triggers_for_unit(
         &mut self,
         e: UnitId,
@@ -1699,7 +1712,8 @@ impl<'a> Sim<'a> {
             return Err("Checking triggers for a dead unit".into());
         }
         let mut a = false;
-        let n = self.get_target(opps);
+        // the target only when a trigger needs it (no effects: same as looking it up first)
+        let mut n: Option<Option<UnitId>> = None;
         for drink in [false, true] {
             let len = if drink {
                 self.units[e].drinks.len()
@@ -1715,7 +1729,7 @@ impl<'a> Sim<'a> {
                 if !present {
                     continue;
                 }
-                if self.consumable_should_trigger(e, drink, slot, n, allies, opps)?
+                if self.consumable_should_trigger(e, drink, slot, &mut n, opps, allies)?
                     && self.try_use_consumable(e, drink, slot)
                 {
                     a = true;
@@ -1730,9 +1744,9 @@ impl<'a> Sim<'a> {
         unit: UnitId,
         drink: bool,
         slot: usize,
-        target: Option<UnitId>,
-        allies: &[UnitId],
+        target: &mut Option<Option<UnitId>>,
         opps: Option<&[UnitId]>,
+        allies: &[UnitId],
     ) -> Result<bool, SimErr> {
         let u = &self.units[unit];
         if u.stunned {
@@ -1754,6 +1768,7 @@ impl<'a> Sim<'a> {
         if c.triggers.is_empty() {
             return Ok(true);
         }
+        let target = *target.get_or_insert_with(|| self.get_target(opps));
         let mut l = true;
         for tr in &c.triggers {
             if !self.trigger_active(tr, unit, target, Some(allies), opps)? {
@@ -2416,6 +2431,13 @@ impl<'a> Sim<'a> {
         self.res.add_hp_spent(h, t.hid, n);
         Ok(())
     }
+}
+
+/// `MWI_TRACE_FROM=<seconds>`: event trace of a 20 s window on stderr. Read once: an environment
+/// lookup per event costs more than many events do.
+fn trace_from() -> Option<f64> {
+    static V: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("MWI_TRACE_FROM").ok().and_then(|w| w.parse().ok()))
 }
 
 fn compare(tr: &Trigger, v: Val) -> Result<bool, SimErr> {

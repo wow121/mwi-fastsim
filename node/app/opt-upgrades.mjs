@@ -6,7 +6,7 @@
 // horizon (cash + resale value of held gear). So a temporary +12 that is later sold for a +14 pays
 // its spread and sales tax twice, and the plan only does that when the earlier profit is worth it.
 import { pool } from "./search.mjs"
-import { seedList, unpaired } from "./evaluator.mjs"
+import { seedList, unpaired, withRunCache } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
@@ -624,7 +624,9 @@ function runPlan(plan, P) {
 /** Greedy insertion, then best-improvement local search (remove / change target / swap). */
 async function searchPlan(P, signal) {
   const moves = []
-  P.slots.forEach((sl, s) => sl.states.forEach((_, j) => j > 0 && moves.push([s, j])))
+  // only states a plan can take: a step needs a higher profit (score) than the held state, and the
+  // held one never falls below the start, so a state at or below it is never bought
+  P.slots.forEach((sl, s) => sl.states.forEach((_, j) => j > 0 && (P.mode === "score" ? P.S[s][j] > P.S[s][0] : P.dp[s][j] > P.dp[s][0]) && moves.push([s, j])))
   let plan = []
   let best = objective(runPlan(plan, P), P)
   const tryPlans = (cands) => {
@@ -714,7 +716,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
     return INF
   }
   const unlockDay = (k, req) => Math.max(0, ...req.map(q => daysTo(k, String(q.skillHrid).split("/").pop(), Number(q.level || 0))))
-  const cfg = { hours: Math.min(48, o.hours * 2), seeds: seedList(33333, Math.min(64, o.seeds.length * 4)), extra: o.extra, objective: "profit", signal: api.signal }
+  const cfg = { hours: o.refineHours, seeds: o.refineSeeds, extra: o.extra, objective: "profit", signal: api.signal }
   // the base of each comparison over 4× the seeds (see `unpaired`)
   const baseCfg = { ...cfg, seeds: seedList(33333, cfg.seeds.length * 4) }
   const withLevels = lv => {
@@ -766,12 +768,19 @@ async function levelGrowth(ev, members, baseline, o, api) {
     const owned = members.map(() => new Set())
     const worn = members.map(c => c.equipment?.charm?.itemHrid || "")
     const bounds = [0, ...times]
+    // what one more level of each skill is worth: measured once, on the levels at the start of the
+    // first stage it is needed in, then kept for the later stages (a few levels more barely change
+    // it, and each measurement is a big share of the whole run)
+    const worth = members.map(() => ({ value: {}, se: {}, step: {}, lv: {} }))
     for (let x = 0; x + 1 < bounds.length; x++) {
       const a = bounds[x]
       const b = bounds[x + 1]
       const lv = members.map((_, k) => levelsAt(k, a))
       const st = { from: a, to: b, members: [] }
-      const base = await ev.evaluate(withLevels(lv), o.target, baseCfg)
+      // the base of the skills first measured in this stage, only when there are any. Day 0: the
+      // levels now, i.e. the team as it is (the same runs as the level growth's base)
+      let baseRun = null
+      const base = () => (baseRun ??= ev.evaluate(a === 0 ? members : withLevels(lv), o.target, baseCfg))
       const P = r => r.mean.profitPerHour * 24
       // what one more level of each skill is worth now (whole team, per day)
       const tasks = []
@@ -780,21 +789,29 @@ async function levelGrowth(ev, members, baseline, o, api) {
         const ok = opts[k].filter(c => c.req.every(q => Number(lv[k][String(q.skillHrid).split("/").pop()] || 1) >= Number(q.level || 0)))
         const gain = c => Object.fromEntries(SKILL_KEYS.map(s => [s, fracOf(exp[s] + c.rates[s] * (b - a)) - fracOf(exp[s])]))
         ok.forEach(c => { c.gain = gain(c) })
-        const per = { k, ok, value: {}, se: {} }
+        const w = worth[k]
+        const per = { k, ok, value: w.value, se: w.se }
         st.members[k] = per
         for (const s of SKILL_KEYS) {
           const most = Math.max(0, ...ok.map(c => c.gain[s]))
           if (!(most > 0.05) || lv[k][s] + 1 >= xpTable.length) continue
-          tasks.push({ per, s, step: Math.max(5, Math.ceil(most)) })
+          if (!(s in w.value) && !w.lv[s]) Object.assign(w, { step: { ...w.step, [s]: Math.max(10, Math.ceil(most)) }, lv: { ...w.lv, [s]: { lv: clone(lv), base } } })
+          tasks.push({ k, s })
         }
       }
-      await pool(tasks, 8, async ({ per, s, step }) => {
-        const l2 = clone(lv)
-        l2[per.k][s] = Math.min(xpTable.length - 1, l2[per.k][s] + step)
-        const r = await ev.evaluate(withLevels(l2), o.target, cfg)
-        const n = l2[per.k][s] - lv[per.k][s]
-        per.value[s] = (P(r) - P(base)) / n
-        per.se[s] = (unpaired(r.perSeed, base.perSeed).se * 24) / n
+      // runs on the levels (and against the base) of the stage the skill was first measured in
+      await pool(tasks.filter(({ k, s }) => !(s in worth[k].value)), 32, async ({ k, s }) => {
+        const w = worth[k]
+        const lv1 = w.lv[s].lv
+        const base1 = await w.lv[s].base()
+        const l2 = clone(lv1)
+        l2[k][s] = Math.min(xpTable.length - 1, l2[k][s] + w.step[s])
+        // +10 levels (or as many as the stage gives): twice the difference of +5, so half the runs
+        // give a better value per level
+        const r = await ev.evaluate(withLevels(l2), o.target, { ...cfg, seeds: cfg.seeds.slice(0, Math.max(8, cfg.seeds.length / 2)) })
+        const n = l2[k][s] - lv1[k][s]
+        w.value[s] = (P(r) - P(base1)) / n
+        w.se[s] = (unpaired(r.perSeed, base1.perSeed).se * 24) / n
       })
       const keep = (H - b) + (b - a) / 2 // days a level farmed in this stage pays, on average
       for (const k of o.optimize) {
@@ -872,8 +889,12 @@ async function levelGrowth(ev, members, baseline, o, api) {
  *           horizons: [days], tax, maxLevelUp, keepEnd, levels (false: combat levels stay as they are),
  *           charms (false: keep the charm worn now while farming levels) }
  */
-export async function adviseUpgrades(ev, params, api) {
+export async function adviseUpgrades(ev0, params, api) {
   const { target, extra } = params
+  // runs repeat across the passes (the bases of the level growth, the charm stages and the re-check
+  // are the same team on the same seeds; identical changes such as +1 to house rooms with the same
+  // global buffs): made only once
+  const ev = withRunCache(ev0)
   const members = clone(params.members)
   const optimize = params.optimize?.length ? params.optimize : members.map((_, i) => i)
   const hours = params.hours || 24
@@ -896,7 +917,12 @@ export async function adviseUpgrades(ev, params, api) {
   const name = k => members[k].name || `队员${k + 1}`
   api.log(`当前全队利润 ${fmtM(P0)}/天，卖出税 ${(tax * 100).toFixed(1)}%，镜子 ${fmtM(gp.mirror)}`)
   members.forEach((_, k) => api.log(`  ${name(k)}：现金 ${fmtM(budget[k])}，战斗利润 ${fmtM(own[k])}/天，其他收入 ${fmtM(otherIncome[k])}/天`))
-  const growth = params.levels === false ? null : await levelGrowth(ev, members, baseline, { maps, horizons, target, hours, seeds, extra, name, gp, optimize, charms: params.charms !== false }, api)
+  // the re-check precision (also of the level growth, the charm values and the validation): 4× the
+  // hours and 2× the runs of the screening, up to 48 hours × 32 runs. The level growth uses the same
+  // seeds, so its base (and the first charm stage's) is the re-check's base again
+  const refineHours = Math.min(48, hours * 4)
+  const refineSeeds = seedList(33333, Math.min(32, seeds.length * 2))
+  const growth = params.levels === false ? null : await levelGrowth(ev, members, baseline, { maps, horizons, target, hours, refineHours, refineSeeds, extra, name, gp, optimize, charms: params.charms !== false }, api)
   const curve = growth?.curve || null
   const maxGain = k => Math.max(0, ...(curve?.[k] || [{ g: 0 }]).map(p => p.g))
   const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, {
@@ -937,9 +963,7 @@ export async function adviseUpgrades(ev, params, api) {
   // with those numbers only; the rest stay in the table as screening results.
   // how long an upgrade has to pay off: the longest horizon (+ the payback days when aiming at income)
   const H = horizons.at(-1) + (mode === "income" ? payback : 0)
-  const refineHours = Math.min(48, hours * 2)
-  const refineSeeds = seedList(55555, Math.min(64, seeds.length * 4))
-  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 60)))
+  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 30)))
   const optimistic = (s, j) => (dp[s][j] + 3 * (info[s][j]?.sig?.se ?? 0) * 24) * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
   const screenNet = (s, j) => dp[s][j] * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
   const hopeful = jobs.filter(({ s, j }) => pay[s][0][j].cost < INF && optimistic(s, j) > 0)
@@ -966,15 +990,19 @@ export async function adviseUpgrades(ev, params, api) {
   let refBase = baseline
   if (picks.length) {
     api.log(`初筛有 ${hopeful.length} 个可能划算的提升，复核${hopeful.length > top.length ? `最有希望的 ${top.length} 个` : "全部"}${below.length ? `，另加它们下面的 ${below.length} 个中间级` : ""}（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
-    refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: seedList(55555, refineSeeds.length * 4), extra, objective: "profit", signal: api.signal })
-    done = 0
-    const again = await pool(picks, 32, async ({ s, j, st }) => {
+    refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: seedList(33333, refineSeeds.length * 4), extra, objective: "profit", signal: api.signal })
+    const recheck = async ({ s, j, st }) => {
       const mem = clone(members)
       st.apply(mem[slots[s].member])
       const r = await ev.evaluate(mem, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
-      api.progress(++done, picks.length, "复核")
       const dpv = r.mean.players.map((p, k) => (p.profitPerHour - refBase.mean.players[k].profitPerHour) * 24)
       return { s, j, dpv, dp: (r.mean.profitPerHour - refBase.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - refBase.mean.xpPerHour, sig: unpaired(r.perSeed, refBase.perSeed) }
+    }
+    done = 0
+    const again = await pool(picks, 32, async x => {
+      const e = await recheck(x)
+      api.progress(++done, picks.length, "复核")
+      return e
     })
     for (const e of again) {
       dp[e.s][e.j] = planDp[e.s][e.j] = e.dp
@@ -1075,13 +1103,20 @@ export async function adviseUpgrades(ev, params, api) {
     const levelGain = members.reduce((a, _, k) => a + gainAt(curve?.[k], days), 0)
     const gainOf = r => r.income - levelGain - income.reduce((a, v) => a + v, 0)
     const ts = Date.now()
-    let r = await searchPlan(P, api.signal)
+    let searchMs = 0
+    const search = async P => {
+      const t = Date.now()
+      const r = await searchPlan(P, api.signal)
+      searchMs += Date.now() - t
+      return r
+    }
+    let r = await search(P)
     for (let round = 0; round < 4; round++) {
       const todo = [...new Map(r.steps.filter(x => !validated[x.s][x.to]).map(x => [`${x.s}:${x.to}`, { s: x.s, j: x.to }])).values()]
       if (!todo.length) break
       api.log(`${days} 天：计划里 ${todo.length} 项提升换一组随机种子再测一遍，用新数字重新规划`)
       await validate(todo)
-      r = await searchPlan(P, api.signal)
+      r = await search(P)
     }
     let check = r.steps.length ? await measure(r.held, gainOf(r)) : null
     let scale = 1
@@ -1089,11 +1124,11 @@ export async function adviseUpgrades(ev, params, api) {
       scale = Math.max(0.2, Math.min(1, check.actual / check.estimated))
       const sum = check.estimated
       P = { ...P, dp: planDp.map(row => row.map(v => v * scale)), dpv: planDpv.map(row => row.map(a => a.map(v => v * scale))) }
-      r = await searchPlan(P, api.signal)
+      r = await search(P)
       check = r.steps.length ? { ...(await measure(r.held, gainOf(r))), sum, scale } : null
       api.log(`${days} 天：一起买实测只有逐项相加的 ${(scale * 100).toFixed(0)}%（提升之间有重叠），收益按这个比例打折后重新规划`)
     }
-    api.log(`规划 ${days} 天用时 ${Date.now() - ts} ms`)
+    api.log(`规划 ${days} 天用时 ${Date.now() - ts} ms（其中搜索 ${searchMs} ms）`)
     const idleRun = runPlan([], P)
     const idle = idleRun.wealth
     const mem = clone(members)

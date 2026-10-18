@@ -92,6 +92,29 @@ pub fn pow(x: f64, y: f64) -> f64 {
     x.powf(y)
 }
 
+/// `pow(x, 1.4)` of the hit chance with a small cache by the input's bits: accuracy and evasion
+/// only change with the stats, but pow ran twice per attack. Same values as `pow`; an empty entry
+/// holds pow(+0, 1.4) = +0.
+pub struct Pow14([(u64, f64); 64]);
+
+impl Default for Pow14 {
+    fn default() -> Self {
+        Pow14([(0, 0.0); 64])
+    }
+}
+
+impl Pow14 {
+    #[inline]
+    pub fn get(&mut self, x: f64) -> f64 {
+        let k = x.to_bits();
+        let e = &mut self.0[((k ^ (k >> 29)).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 58) as usize];
+        if e.0 != k {
+            *e = (k, pow(x, 1.4));
+        }
+        e.1
+    }
+}
+
 /// `x || 0` for numbers.
 #[inline]
 pub fn or0(x: f64) -> f64 {

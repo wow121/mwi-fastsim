@@ -68,14 +68,48 @@ export class Evaluator {
 
   /** Mean metrics over `seeds`; also returns the per-seed objective values. With `items`, the
    *  mean also has the team's revenue / expense items per hour (`mean.items`). */
-  async evaluate(members, target, { hours, seeds, extra, objective = "profit", signal, items = false }) {
+  async evaluate(members, target, { hours, seeds, extra, objective = "profit", signal, items = false, cache }) {
     if (signal?.aborted) throw new Error("cancelled")
-    const runs = await Promise.all(seeds.map(seed => this.runOnce(members, target, { hours, seed, extra, keep: items })))
+    // with a run cache (a Map, see withRunCache), a run of the same engine input (team, target,
+    // hours) and seed is reused: a base over 4× the seeds holds the runs of the shorter series, and
+    // changes that come out the same (+1 to any of the house rooms with the same global buffs) run once
+    const key = cache && !items ? `${hash(JSON.stringify(compilePayload(this.ctx.m, buildPayload(this.ctx.m, members, target, { hours, seed: 0, extra }))))}:` : null
+    const one = seed => {
+      if (!key) return this.runOnce(members, target, { hours, seed, extra, keep: items })
+      let p = cache.get(key + seed)
+      if (!p) {
+        p = this.runOnce(members, target, { hours, seed, extra }).then(r => ({ metrics: r.metrics }))
+        p.catch(() => cache.delete(key + seed))
+        cache.set(key + seed, p)
+      }
+      return p
+    }
+    const runs = await Promise.all(seeds.map(one))
     const per = runs.map(r => r.metrics)
     const mean = average(per)
     if (items) mean.items = teamItems(this.ctx.book, runs.map(r => r.result), members.length)
     return { mean, per, perSeed: per.map(p => objectiveValue(p, objective)), value: objectiveValue(mean, objective) }
   }
+}
+
+/** The evaluator with a run cache of its own, for one job (metrics follow the prices of the moment). */
+export function withRunCache(ev) {
+  const cache = new Map()
+  return { ctx: ev.ctx, evaluate: (members, target, o) => ev.evaluate(members, target, { ...o, cache }) }
+}
+
+/** 53-bit string hash (cyrb53). */
+function hash(s) {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 2654435761)
+    h2 = Math.imul(h2 ^ c, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (2097152 * (h2 >>> 0) + (h1 >>> 0)).toString(36)
 }
 
 /** Team revenue / expense items per hour, averaged over runs (bid for drops, ask for consumables). */

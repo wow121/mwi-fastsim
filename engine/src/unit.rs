@@ -6,6 +6,7 @@ use crate::stats::*;
 use crate::js::FxIndexMap as IndexMap;
 use serde_json::Value;
 use std::rc::Rc;
+use smallvec::SmallVec;
 
 pub type UnitId = usize;
 
@@ -411,7 +412,14 @@ impl Unit {
 
     pub fn remove_expired(&mut self, time: f64) {
         let mut ch = false;
-        let keys: Vec<u32> = self.candidates.keys().copied().collect();
+        // only the buffs with an expired copy: an unchanged list selects the same strongest one
+        let expired = |a: &Buff| !(a.permanent || a.start + a.duration > time);
+        let keys: SmallVec<[u32; 8]> = self
+            .candidates
+            .iter()
+            .filter(|(_, list)| list.is_empty() || list.iter().any(expired))
+            .map(|(&k, _)| k)
+            .collect();
         for t in keys {
             let before = self.eff(t);
             let empty = {
