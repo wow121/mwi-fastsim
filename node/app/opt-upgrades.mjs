@@ -1,12 +1,12 @@
 // Team upgrade planner. Every reachable state of every slot (enhancement levels of the current
 // item and its refined version, the class's upper replacement, ability levels) is simulated
-// against the current team with paired seeds. Then a purchase plan is searched for each horizon:
-// starting cash, income = team profit (+ other income), purchases happen as soon as the cash is
-// there, and the objective is the wealth at the horizon (cash + resale value of held gear). So a
-// temporary +12 that is later sold for a +14 pays its spread and sales tax twice, and the plan
-// only does that when the earlier profit is worth it.
+// against the current team (run over 4× the seeds, so its luck does not shift every comparison).
+// Then a purchase plan is searched for each horizon: starting cash, income = team profit (+ other
+// income), purchases happen as soon as the cash is there, and the objective is the wealth at the
+// horizon (cash + resale value of held gear). So a temporary +12 that is later sold for a +14 pays
+// its spread and sales tax twice, and the plan only does that when the earlier profit is worth it.
 import { pool } from "./search.mjs"
-import { paired, seedList } from "./evaluator.mjs"
+import { seedList, unpaired } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
@@ -14,6 +14,7 @@ const ARTISAN = 0.89
 const MIRROR = "/items/philosophers_mirror"
 const INF = Number.POSITIVE_INFINITY
 const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
+export const SKILL_ZH = { stamina: "耐力", intelligence: "智力", attack: "攻击", melee: "近战", defense: "防御", ranged: "远程", magic: "魔法" }
 export const SLOT_ZH = { weapon: "武器", off_hand: "副手", head: "头部", body: "身体", legs: "腿部", hands: "手部", feet: "脚部", back: "背部", neck: "项链", earrings: "耳环", ring: "戒指", pouch: "袋子" }
 
 // the site's per-class "upper replacement" targets (simulationStatistics `re`)
@@ -295,8 +296,13 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       const t = gp.transition(h0, n0, h, n)
       if (!(t.cost < INF) || t.cost > opts.maxSpend) return
       const req = maps.itemDetailMap[h]?.equipmentDetail?.levelRequirements || []
-      if (req.some(q => Number(cfg.levels?.[String(q.skillHrid).split("/").pop()] || 1) < Number(q.level || 0))) return
-      states.push({ label: `${nm(h)} +${n}`, h, n, fam, ref: h === gp.family(h).refined ? 1 : 0 })
+      // too low a level now: with level growth, wearable from the day the requirements are met
+      let unlock = 0
+      if (req.some(q => Number(cfg.levels?.[String(q.skillHrid).split("/").pop()] || 1) < Number(q.level || 0))) {
+        unlock = opts.unlockDay ? opts.unlockDay(idx, req) : INF
+        if (!(unlock <= (opts.unlockBy ?? 0))) return
+      }
+      states.push({ label: `${nm(h)} +${n}`, h, n, fam, ref: h === gp.family(h).refined ? 1 : 0, unlock })
     }
     const fams = []
     if (h0) fams.push({ f: gp.family(h0), from: n0, own: true, fam: 0 })
@@ -499,11 +505,73 @@ function objective(r, P) {
   return r.wealth
 }
 
+/**
+ * Level growth: a member's extra profit per day from the levels farmed by day t, as points
+ * [{ t, g }] from { t: 0, g: 0 }, linear in between and flat after the last one.
+ */
+function gainAt(pts, t) {
+  if (!pts) return 0
+  for (let x = 1; x < pts.length; x++) {
+    const a = pts[x - 1]
+    const b = pts[x]
+    if (t <= b.t) return a.g + ((b.g - a.g) * (t - a.t)) / (b.t - a.t)
+  }
+  return pts.at(-1).g
+}
+
+/** Coins earned from time a for dt days at rate `inc` + the level gain. */
+function earned(pts, inc, a, dt) {
+  if (!(dt > 0)) return 0
+  let v = inc * dt
+  if (!pts) return v
+  const b = a + dt
+  let x = a
+  for (let q = 1; q < pts.length && x < b; q++) {
+    const end = Math.min(b, pts[q].t)
+    if (end > x) v += ((gainAt(pts, x) + gainAt(pts, end)) / 2) * (end - x)
+    x = Math.max(x, end)
+  }
+  if (b > x) v += pts.at(-1).g * (b - x)
+  return v
+}
+
+/** Days from time a until `need` more coins are earned (INF if never). */
+function waitFor(pts, inc, a, need) {
+  if (need <= 0) return 0
+  let x = a
+  if (pts) {
+    for (let q = 1; q < pts.length; q++) {
+      if (pts[q].t <= x) continue
+      const len = pts[q].t - x
+      const got = earned(pts, inc, x, len)
+      if (got < need) {
+        need -= got
+        x = pts[q].t
+        continue
+      }
+      // rate is linear in the segment: inc + r0 + sl·τ, so the amount is r·τ + sl·τ²/2
+      const r = inc + gainAt(pts, x)
+      const sl = (pts[q].g - pts[q - 1].g) / (pts[q].t - pts[q - 1].t)
+      if (Math.abs(sl) < 1e-9) return x - a + need / r
+      const d = Math.sqrt(Math.max(0, r * r + 2 * sl * need))
+      const roots = [(-r + d) / sl, (-r - d) / sl].filter(v => v > 0 && v <= len + 1e-9)
+      return x - a + (roots.length ? Math.min(...roots) : len)
+    }
+  }
+  const r = inc + (pts ? pts.at(-1).g : 0)
+  return r > 0 ? x - a + need / r : INF
+}
+
 function runPlan(plan, P) {
   const n = P.budget.length
   const held = P.slots.map(() => 0)
   const cash = [...P.budget]
   const inc = [...P.income]
+  const curve = k => P.curve?.[k] || null
+  // charms bought for farming levels: paid on their day (day 0: from the starting cash)
+  const charges = k => P.charges?.[k] || []
+  const owed = (k, a, b) => charges(k).reduce((v, x) => v + (x.day > a && x.day <= b ? x.cost : 0), 0)
+  for (let k = 0; k < n; k++) cash[k] -= charges(k).reduce((v, x) => v + (x.day <= 0 ? x.cost : 0), 0)
   const queues = Array.from({ length: n }, () => [])
   for (const [s, j] of plan) queues[P.slots[s].member].push([s, j])
   const ptr = new Array(n).fill(0)
@@ -522,25 +590,35 @@ function runPlan(plan, P) {
       if (ptr[k] >= queues[k].length) continue
       const [s, j] = queues[k][ptr[k]]
       const c = P.pay[s][held[s]][j].cost
-      const wait = c <= cash[k] ? 0 : inc[k] > 0 ? (c - cash[k]) / inc[k] : INF
+      // gear that needs higher levels: not before the day they are reached
+      const u = Math.max(0, (P.slots[s].states[j].unlock || 0) - t)
+      const need = c - cash[k] - earned(curve(k), inc[k], t, u)
+      let wait = u + waitFor(curve(k), inc[k], t + u, need)
+      for (let it = 0; it < 6 && wait < INF; it++) {
+        const w = u + waitFor(curve(k), inc[k], t + u, need + owed(k, t, t + wait))
+        if (Math.abs(w - wait) < 1e-9) break
+        wait = w
+      }
       if (t + wait <= P.days && (!best || wait < best.wait)) best = { k, s, j, c, wait }
     }
     if (!best) break
     const { k, s, j, c, wait } = best
+    for (let q = 0; q < n; q++) cash[q] += earned(curve(q), inc[q], t, wait) - owed(q, t, t + wait)
     t += wait
-    for (let q = 0; q < n; q++) cash[q] += inc[q] * wait
     const i = held[s]
     const cashBefore = cash[k]
     cash[k] = Math.max(0, cash[k] - c)
     held[s] = j
     for (let q = 0; q < n; q++) inc[q] += P.dpv[s][j][q] - P.dpv[s][i][q]
     ptr[k]++
-    steps.push({ s, from: i, to: j, day: t, cost: c, how: P.pay[s][i][j].how, cashBefore, cashAfter: cash[k], incomeAfter: inc[k] })
+    steps.push({ s, from: i, to: j, day: t, cost: c, how: P.pay[s][i][j].how, cashBefore, cashAfter: cash[k], incomeAfter: inc[k] + gainAt(curve(k), t) })
   }
-  const endCash = cash.map((c, q) => c + inc[q] * (P.days - t))
-  const wealth = endCash.reduce((a, v) => a + v, 0) + held.reduce((a, j, s) => a + P.Lend[s][j], 0)
+  const endCash = cash.map((c, q) => c + earned(curve(q), inc[q], t, P.days - t) - owed(q, t, P.days))
+  const charmsBack = Array.from({ length: n }, (_, q) => charges(q).reduce((v, x) => v + (x.day <= P.days ? x.resale : 0), 0))
+  const wealth = endCash.reduce((a, v) => a + v, 0) + charmsBack.reduce((a, v) => a + v, 0) + held.reduce((a, j, s) => a + P.Lend[s][j], 0)
   const score = held.reduce((a, j, s) => a + P.S[s][j] - P.S[s][0], 0)
-  return { wealth, steps, held, score, income: inc.reduce((a, v) => a + v, 0), incomes: inc, cash: endCash }
+  const incomes = inc.map((v, q) => v + gainAt(curve(q), P.days))
+  return { wealth, steps, held, score, income: incomes.reduce((a, v) => a + v, 0), incomes, cash: endCash }
 }
 
 /** Greedy insertion, then best-improvement local search (remove / change target / swap). */
@@ -577,10 +655,222 @@ async function searchPlan(P, signal) {
   return { plan, ...r }
 }
 
+const unlockText = st => (st?.unlock > 0.05 ? `（第 ${st.unlock.toFixed(1)} 天够等级）` : "")
+
+/**
+ * Combat levels farmed over the plan: from the synced experience and the experience per day at the
+ * target now, the levels of every member on a few days (the horizons and quarters of the longest);
+ * the team with those levels (gear unchanged) is simulated on the baseline's seeds, which gives
+ * each member's extra profit per day from levels alone (`curve`, linear in between), at the re-check
+ * precision (few runs, and level gains are small next to the team's profit). Gear whose
+ * level requirements are not met yet becomes wearable on the day they are (`unlockDay`).
+ * The experience rate is kept as it is now (levels and upgrades also raise it a little).
+ *
+ * Charms (o.charms): a charm only moves experience (its focus skill gets a share of all of it, plus
+ * its bonus), and what a level is worth differs per member and map. The days up to the longest
+ * horizon are cut into stages at the same days; at the start of each stage, with the levels farmed
+ * so far, every skill of every member is raised a few levels on its own (against the team at
+ * those levels), which gives the value of one level per day. Each member then wears the charm whose
+ * levels over the stage are worth the most until the horizon, less the loss on buying and reselling
+ * a charm not owned yet (`charges`: bought at the stage start, resold after tax at the horizon);
+ * it switches only when that is clearly more than the noise of those values.
+ */
+async function levelGrowth(ev, members, baseline, o, api) {
+  const xpTable = o.maps.levelExperienceTable || []
+  const H = o.horizons.at(-1)
+  const times = [...new Set([...o.horizons, ...[0.25, 0.5, 0.75].map(f => Math.round(H * f))])].filter(t => t > 0).sort((a, b) => a - b)
+  const baseRates = k => Object.fromEntries(SKILL_KEYS.map(s => [s, Math.max(0, Number(baseline.mean.players[k]?.[`xp_${s}`] || 0) * 24)]))
+  const lv0 = (k, s) => Math.max(1, Math.floor(Number(members[k].levels?.[s] || 1)))
+  const exp0 = (k, s) => {
+    const L = lv0(k, s)
+    const e = Number(members[k].experience?.[s])
+    return Number.isFinite(e) && e >= Number(xpTable[L] || 0) && e < Number(xpTable[L + 1] ?? INF) ? e : Number(xpTable[L] || 0)
+  }
+  // experience per day of each member by stage: [{ a, b, rates }], the last one continues after b
+  const plan = members.map((_, k) => [{ a: 0, b: INF, rates: baseRates(k) }])
+  const expAt = (k, s, T) => plan[k].reduce((e, g) => e + g.rates[s] * Math.max(0, Math.min(T, g.b) - g.a), exp0(k, s))
+  const levelOf = e => {
+    let L = 1
+    while (L + 1 < xpTable.length && Number(xpTable[L + 1]) <= e) L++
+    return L
+  }
+  // fractional level (for the value of part of a level)
+  const fracOf = e => {
+    const L = levelOf(e)
+    const lo = Number(xpTable[L] || 0)
+    const hi = Number(xpTable[L + 1] ?? INF)
+    return hi < INF ? L + (e - lo) / (hi - lo) : L
+  }
+  const levelAt = (k, s, T) => Math.max(lv0(k, s), levelOf(expAt(k, s, T)))
+  const levelsAt = (k, T) => Object.fromEntries(SKILL_KEYS.map(s => [s, levelAt(k, s, T)]))
+  const daysTo = (k, s, L) => {
+    let need = Number(xpTable[L] ?? INF) - exp0(k, s)
+    if (need <= 0) return 0
+    for (const g of plan[k]) {
+      const got = g.rates[s] * (g.b - g.a)
+      if (got >= need) return g.a + need / g.rates[s]
+      need -= got
+    }
+    return INF
+  }
+  const unlockDay = (k, req) => Math.max(0, ...req.map(q => daysTo(k, String(q.skillHrid).split("/").pop(), Number(q.level || 0))))
+  const cfg = { hours: Math.min(48, o.hours * 2), seeds: seedList(33333, Math.min(64, o.seeds.length * 4)), extra: o.extra, objective: "profit", signal: api.signal }
+  // the base of each comparison over 4× the seeds (see `unpaired`)
+  const baseCfg = { ...cfg, seeds: seedList(33333, cfg.seeds.length * 4) }
+  const withLevels = lv => {
+    const mem = clone(members)
+    mem.forEach((c, k) => { c.levels = { ...c.levels, ...lv[k] } })
+    return mem
+  }
+
+  const charges = members.map(() => [])
+  const stages = []
+  if (o.charms) {
+    // options per member: the charm worn now (free) and every charm on the market, with the
+    // experience per day each gives (relative to the current one, on the same short runs)
+    const TIERS = ["trainee", "basic", "advanced", "expert", "master", "grandmaster"]
+    const quick = { hours: Math.min(12, o.hours), seeds: seedList(4343, 4), extra: o.extra, objective: "profit", signal: api.signal }
+    const opts = members.map(() => null)
+    const jobs = []
+    for (const k of o.optimize) {
+      const cur = members[k].equipment?.charm
+      const h0 = cur?.itemHrid || ""
+      opts[k] = [{ hrid: h0, label: h0 ? `${zh(o.maps, h0)}${cur.enhancementLevel ? ` +${cur.enhancementLevel}` : ""}（现在戴的）` : "不戴护符（现在）", cost: 0, resale: 0, req: [], current: true, rates: null }]
+      jobs.push({ k, x: opts[k][0] })
+      for (const sk of SKILL_KEYS) for (const t of TIERS) {
+        const h = `/items/${t}_${sk}_charm`
+        const it = o.maps.itemDetailMap[h]
+        if (!it || h === h0) continue
+        const cost = o.gp.quote(h, 0).ask
+        if (!(cost < INF)) continue
+        const x = { hrid: h, label: zh(o.maps, h), cost, resale: o.gp.value(h, 0), req: it.equipmentDetail?.levelRequirements || [], focus: sk, rates: null }
+        opts[k].push(x)
+        jobs.push({ k, x })
+      }
+    }
+    let done = 0
+    await pool(jobs, 32, async ({ k, x }) => {
+      const mem = clone(members)
+      if (!x.current) mem[k].equipment = { ...mem[k].equipment, charm: { itemHrid: x.hrid, enhancementLevel: 0 } }
+      const r = await ev.evaluate(mem, o.target, quick)
+      x.raw = Object.fromEntries(SKILL_KEYS.map(s => [s, Math.max(0, Number(r.mean.players[k]?.[`xp_${s}`] || 0) * 24)]))
+      api.progress(++done, jobs.length, "护符经验")
+    })
+    for (const k of o.optimize) {
+      const now = baseRates(k)
+      const cur = opts[k][0].raw
+      for (const x of opts[k]) x.rates = Object.fromEntries(SKILL_KEYS.map(s => [s, cur[s] > 0 ? (now[s] * x.raw[s]) / cur[s] : x.raw[s]]))
+      plan[k] = []
+    }
+    api.log(`护符：每人 ${opts.find(Boolean)?.length - 1 || 0} 种可买，按 ${times.length} 个阶段规划刷经验时戴哪个`)
+    const owned = members.map(() => new Set())
+    const worn = members.map(c => c.equipment?.charm?.itemHrid || "")
+    const bounds = [0, ...times]
+    for (let x = 0; x + 1 < bounds.length; x++) {
+      const a = bounds[x]
+      const b = bounds[x + 1]
+      const lv = members.map((_, k) => levelsAt(k, a))
+      const st = { from: a, to: b, members: [] }
+      const base = await ev.evaluate(withLevels(lv), o.target, baseCfg)
+      const P = r => r.mean.profitPerHour * 24
+      // what one more level of each skill is worth now (whole team, per day)
+      const tasks = []
+      for (const k of o.optimize) {
+        const exp = Object.fromEntries(SKILL_KEYS.map(s => [s, expAt(k, s, a)]))
+        const ok = opts[k].filter(c => c.req.every(q => Number(lv[k][String(q.skillHrid).split("/").pop()] || 1) >= Number(q.level || 0)))
+        const gain = c => Object.fromEntries(SKILL_KEYS.map(s => [s, fracOf(exp[s] + c.rates[s] * (b - a)) - fracOf(exp[s])]))
+        ok.forEach(c => { c.gain = gain(c) })
+        const per = { k, ok, value: {}, se: {} }
+        st.members[k] = per
+        for (const s of SKILL_KEYS) {
+          const most = Math.max(0, ...ok.map(c => c.gain[s]))
+          if (!(most > 0.05) || lv[k][s] + 1 >= xpTable.length) continue
+          tasks.push({ per, s, step: Math.max(5, Math.ceil(most)) })
+        }
+      }
+      await pool(tasks, 8, async ({ per, s, step }) => {
+        const l2 = clone(lv)
+        l2[per.k][s] = Math.min(xpTable.length - 1, l2[per.k][s] + step)
+        const r = await ev.evaluate(withLevels(l2), o.target, cfg)
+        const n = l2[per.k][s] - lv[per.k][s]
+        per.value[s] = (P(r) - P(base)) / n
+        per.se[s] = (unpaired(r.perSeed, base.perSeed).se * 24) / n
+      })
+      const keep = (H - b) + (b - a) / 2 // days a level farmed in this stage pays, on average
+      for (const k of o.optimize) {
+        const per = st.members[k]
+        const net = c => SKILL_KEYS.reduce((v, s) => v + Math.max(0, per.value[s] || 0) * c.gain[s], 0) * keep - (owned[k].has(c.hrid) || c.current ? 0 : c.cost - c.resale)
+        // switch from the charm worn in the last stage only when the other one is clearly better:
+        // the values of a level are small (~1M/day) and about as uncertain, so a switch on a
+        // smaller margin would mostly follow the noise
+        const prev = per.ok.find(c => c.hrid === worn[k]) || per.ok.find(c => c.current) || per.ok[0]
+        const noise = c => keep * Math.sqrt(SKILL_KEYS.reduce((v, s) => v + ((c.gain[s] - prev.gain[s]) * (per.se[s] || 0)) ** 2, 0))
+        const best = per.ok.reduce((p, c) => (net(c) > net(p) ? c : p), prev)
+        const pick = net(best) - net(prev) > 2 * noise(best) + 1 ? best : prev
+        worn[k] = pick.hrid
+        if (!pick.current && !owned[k].has(pick.hrid)) {
+          owned[k].add(pick.hrid)
+          charges[k].push({ day: a, cost: pick.cost, resale: pick.resale, label: pick.label })
+        }
+        plan[k].push({ a, b: x + 2 === bounds.length ? INF : b, rates: pick.rates })
+        Object.assign(per, { charm: pick.label, focus: pick.focus || null, bought: charges[k].at(-1)?.day === a && charges[k].at(-1)?.label === pick.label ? pick.cost : 0 })
+      }
+      stages.push({
+        from: a, to: b,
+        members: o.optimize.map(k => {
+          const per = st.members[k]
+          return { member: k, name: o.name(k), charm: per.charm, focus: per.focus, cost: per.bought, values: SKILL_KEYS.filter(s => per.value[s] !== undefined).map(s => ({ skill: s, name: SKILL_ZH[s], perLevel: per.value[s] })) }
+        }),
+      })
+      api.log(`  第 ${a}–${b} 天：${stages.at(-1).members.map(m => `${m.name} 戴${m.charm}（每级：${m.values.map(v => `${v.name} ${fmtM(v.perLevel)}`).join("，") || "—"}）`).join("；")}`)
+      api.progress(x + 1, bounds.length - 1, "护符阶段")
+    }
+  }
+
+  const start = JSON.stringify(members.map((_, k) => levelsAt(k, 0)))
+  const configs = times.map(T => members.map((_, k) => levelsAt(k, T)))
+  const keys = [...new Set(configs.map(c => JSON.stringify(c)).filter(c => c !== start))]
+  const noXp = members.map((c, k) => (c.experience ? null : o.name(k))).filter(Boolean)
+  api.log(`考虑战斗等级增长：按${noXp.length ? "" : "同步时的经验和"}现在在这里每天的经验推算${noXp.length ? `（${noXp.join("、")} 没有当前经验数据，按整级算）` : ""}，模拟 ${keys.length} 个时间点的等级`)
+  let done = 0
+  const total = keys.length ? keys.length + 1 : 0
+  const base = keys.length ? await ev.evaluate(members, o.target, baseCfg) : null
+  if (base) api.progress(++done, total, "等级增长")
+  const evals = await pool(keys, 8, async key => {
+    const r = await ev.evaluate(withLevels(JSON.parse(key)), o.target, cfg)
+    api.progress(++done, total, "等级增长")
+    return [key, r.mean.players.map((p, k) => (p.profitPerHour - base.mean.players[k].profitPerHour) * 24)]
+  })
+  const gainOf = new Map(evals)
+  const gains = configs.map(c => gainOf.get(JSON.stringify(c)) || members.map(() => 0))
+  const curve = members.map((_, k) => [{ t: 0, g: 0 }, ...times.map((t, x) => ({ t, g: gains[x][k] }))])
+  const changed = (k, T) => SKILL_KEYS.filter(s => levelAt(k, s, T) > lv0(k, s))
+  members.forEach((_, k) => {
+    const c = changed(k, H)
+    api.log(`  ${o.name(k)}：${c.length ? c.map(s => `${SKILL_ZH[s]} ${lv0(k, s)} → ${levelAt(k, s, H)}`).join("，") : "没有能升的等级"}（${H} 天）`)
+  })
+  times.forEach((t, x) => api.log(`  第 ${t} 天：只靠等级全队 ${gains[x].reduce((a, v) => a + v, 0) >= 0 ? "+" : ""}${fmtM(gains[x].reduce((a, v) => a + v, 0))}/天`))
+  const report = {
+    times,
+    members: members.map((_, k) => ({
+      name: o.name(k),
+      skills: SKILL_KEYS.filter(s => expAt(k, s, H) > exp0(k, s) || changed(k, H).includes(s)).map(s => ({
+        skill: s, name: SKILL_ZH[s], from: lv0(k, s), xpPerDay: (expAt(k, s, H) - exp0(k, s)) / H, at: times.map(T => levelAt(k, s, T)),
+      })),
+    })),
+    gains: times.map((t, x) => ({ day: t, team: gains[x].reduce((a, v) => a + v, 0), perMember: gains[x] })),
+    stages,
+    charmCost: charges.map(c => c.reduce((a, x) => a + x.cost, 0)),
+    noExperience: noXp,
+  }
+  return { curve, unlockDay, charges, report }
+}
+
 /**
  * params: { members, target, extra, optimize, hours, seeds, replacements, budgets: [per member],
  *           otherIncomes: [per member],
- *           horizons: [days], tax, maxLevelUp, keepEnd }
+ *           horizons: [days], tax, maxLevelUp, keepEnd, levels (false: combat levels stay as they are),
+ *           charms (false: keep the charm worn now while farming levels) }
  */
 export async function adviseUpgrades(ev, params, api) {
   const { target, extra } = params
@@ -598,14 +888,21 @@ export async function adviseUpgrades(ev, params, api) {
   const payback = Math.max(0, Number(params.paybackDays ?? 180))
   const fair = fairValue(maps, ev.ctx.book, gp)
 
-  const baseline = await ev.evaluate(members, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
+  // every comparison is against this base, so over 4× the seeds (its luck would shift them all)
+  const baseline = await ev.evaluate(members, target, { hours, seeds: seedList(77777, seeds.length * 4), extra, objective: "profit", signal: api.signal })
   const P0 = baseline.mean.profitPerHour * 24
   const own = baseline.mean.players.map(p => p.profitPerHour * 24)
   const income = members.map((_, k) => own[k] + otherIncome[k])
   const name = k => members[k].name || `队员${k + 1}`
   api.log(`当前全队利润 ${fmtM(P0)}/天，卖出税 ${(tax * 100).toFixed(1)}%，镜子 ${fmtM(gp.mirror)}`)
   members.forEach((_, k) => api.log(`  ${name(k)}：现金 ${fmtM(budget[k])}，战斗利润 ${fmtM(own[k])}/天，其他收入 ${fmtM(otherIncome[k])}/天`))
-  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, { maxSpend: budget[idx] + Math.max(0, income[idx]) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3, fair }))
+  const growth = params.levels === false ? null : await levelGrowth(ev, members, baseline, { maps, horizons, target, hours, seeds, extra, name, gp, optimize, charms: params.charms !== false }, api)
+  const curve = growth?.curve || null
+  const maxGain = k => Math.max(0, ...(curve?.[k] || [{ g: 0 }]).map(p => p.g))
+  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, {
+    maxSpend: budget[idx] + Math.max(0, income[idx] + maxGain(idx)) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3, fair,
+    unlockDay: growth?.unlockDay, unlockBy: growth ? horizons.at(-1) : 0,
+  }))
   const scores = members.map(c => combatScore(maps, c, fair))
   api.log(`战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：${members.map((_, k) => `${name(k)} ${fmtScore(scores[k])}`).join("，")}`)
   const jobs = slots.flatMap((sl, s) => sl.states.slice(1).map((st, k) => ({ s, j: k + 1, st })))
@@ -617,7 +914,7 @@ export async function adviseUpgrades(ev, params, api) {
     const r = await ev.evaluate(mem, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
     api.progress(++done, jobs.length, "逐项模拟")
     const dpv = r.mean.players.map((p, k) => (p.profitPerHour - baseline.mean.players[k].profitPerHour) * 24)
-    return { s, j, dpv, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: paired(r.perSeed, baseline.perSeed) }
+    return { s, j, dpv, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: unpaired(r.perSeed, baseline.perSeed) }
   })
   const dp = slots.map(sl => sl.states.map(() => 0))
   const dpv = slots.map(sl => sl.states.map(() => members.map(() => 0)))
@@ -669,7 +966,7 @@ export async function adviseUpgrades(ev, params, api) {
   let refBase = baseline
   if (picks.length) {
     api.log(`初筛有 ${hopeful.length} 个可能划算的提升，复核${hopeful.length > top.length ? `最有希望的 ${top.length} 个` : "全部"}${below.length ? `，另加它们下面的 ${below.length} 个中间级` : ""}（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
-    refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
+    refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: seedList(55555, refineSeeds.length * 4), extra, objective: "profit", signal: api.signal })
     done = 0
     const again = await pool(picks, 32, async ({ s, j, st }) => {
       const mem = clone(members)
@@ -677,7 +974,7 @@ export async function adviseUpgrades(ev, params, api) {
       const r = await ev.evaluate(mem, target, { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal })
       api.progress(++done, picks.length, "复核")
       const dpv = r.mean.players.map((p, k) => (p.profitPerHour - refBase.mean.players[k].profitPerHour) * 24)
-      return { s, j, dpv, dp: (r.mean.profitPerHour - refBase.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - refBase.mean.xpPerHour, sig: paired(r.perSeed, refBase.perSeed) }
+      return { s, j, dpv, dp: (r.mean.profitPerHour - refBase.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - refBase.mean.xpPerHour, sig: unpaired(r.perSeed, refBase.perSeed) }
     })
     for (const e of again) {
       dp[e.s][e.j] = planDp[e.s][e.j] = e.dp
@@ -703,7 +1000,7 @@ export async function adviseUpgrades(ev, params, api) {
     const loss = t.cost - L[s][j] + L[s][0]
     rows.push({
       id: `${sl.key}#${j}`, member: sl.member, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, label: st.label,
-      cost: t.cost, how: t.how, loss, dProfitPerDay: dp[s][j], dOwnPerDay: dpv[s][j][sl.member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig, refined: refined[s][j], dScore: S[s][j] - S[s][0],
+      cost: t.cost, how: t.how + unlockText(st), loss, dProfitPerDay: dp[s][j], unlock: st.unlock || 0, dOwnPerDay: dpv[s][j][sl.member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig, refined: refined[s][j], dScore: S[s][j] - S[s][0],
       net: Object.fromEntries(horizons.map(d => [d, dp[s][j] * d - loss])),
       paybackDays: dp[s][j] > 0 ? loss / dp[s][j] : null,
     })
@@ -718,7 +1015,7 @@ export async function adviseUpgrades(ev, params, api) {
       st.apply(mem)
       const r = await ev.evaluate(mem, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
       api.progress(++done, gjobs.length, "公会加成")
-      return { g, j, st, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: paired(r.perSeed, baseline.perSeed) }
+      return { g, j, st, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: unpaired(r.perSeed, baseline.perSeed) }
     })
     for (const e of gevals) {
       rows.push({
@@ -732,39 +1029,100 @@ export async function adviseUpgrades(ev, params, api) {
   rows.sort((a, b) => b.net[horizons.at(-1)] - a.net[horizons.at(-1)])
 
   // plans
+  // Winner's curse: the plan takes the states with the highest re-checked numbers, and with effects
+  // about the size of the noise those are mostly the lucky ones (seen: 22 steps planned at +38M/day,
+  // +16M/day when each was measured again on other seeds). So the states a plan takes are measured
+  // once more on fresh seeds, the plan is searched again with those numbers, until it takes no
+  // unverified state. Then the end state is measured as a whole: upgrades overlap (the same 22
+  // steps: +11M/day together), so when it is clearly below the sum of the steps every gain of this
+  // horizon is scaled down by that ratio and the plan is searched once more.
   const plans = []
+  const valCfg = { hours: refineHours, seeds: seedList(13579, refineSeeds.length), extra, objective: "profit" }
+  const checkCfg = { hours: refineHours, seeds: seedList(91919, refineSeeds.length), extra, objective: "profit" }
+  let valBase = null
+  let checkBase = null
+  const validated = slots.map(sl => sl.states.map(() => false))
+  const validate = async list => {
+    valBase ??= await ev.evaluate(members, target, { ...valCfg, seeds: seedList(13579, valCfg.seeds.length * 4), signal: api.signal })
+    let n = 0
+    await pool(list, 32, async ({ s, j }) => {
+      const mem = clone(members)
+      slots[s].states[j].apply(mem[slots[s].member])
+      const r = await ev.evaluate(mem, target, { ...valCfg, signal: api.signal })
+      api.progress(++n, list.length, "验证选中的提升")
+      const e = {
+        s, j, dpv: r.mean.players.map((p, k) => (p.profitPerHour - valBase.mean.players[k].profitPerHour) * 24),
+        dp: (r.mean.profitPerHour - valBase.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - valBase.mean.xpPerHour, sig: unpaired(r.perSeed, valBase.perSeed),
+      }
+      dp[s][j] = planDp[s][j] = e.dp
+      dpv[s][j] = planDpv[s][j] = e.dpv
+      info[s][j] = e
+      validated[s][j] = true
+    })
+  }
+  // the end state of a plan measured as a whole, on seeds no choice has seen
+  const measure = async (held, estimated) => {
+    checkBase ??= await ev.evaluate(members, target, { ...checkCfg, seeds: seedList(91919, checkCfg.seeds.length * 4), signal: api.signal })
+    const mem = clone(members)
+    held.forEach((j, s) => j && slots[s].states[j].apply(mem[slots[s].member]))
+    const f = await ev.evaluate(mem, target, { ...checkCfg, signal: api.signal })
+    return { estimated, actual: (f.mean.profitPerHour - checkBase.mean.profitPerHour) * 24, sig: unpaired(f.perSeed, checkBase.perSeed) }
+  }
   for (const days of horizons) {
     if (api.signal.aborted) throw new Error("cancelled")
     api.progress(0, 1, `规划 ${days} 天`)
-    const P = { slots, dp: planDp, dpv: planDpv, L, Lend, S, pay, budget, income, days, mode, payback }
+    let P = { slots, dp: planDp, dpv: planDpv, L, Lend, S, pay, budget, income, days, mode, payback, curve, charges: growth?.charges }
+    const levelGain = members.reduce((a, _, k) => a + gainAt(curve?.[k], days), 0)
+    const gainOf = r => r.income - levelGain - income.reduce((a, v) => a + v, 0)
     const ts = Date.now()
-    const r = await searchPlan(P, api.signal)
+    let r = await searchPlan(P, api.signal)
+    for (let round = 0; round < 4; round++) {
+      const todo = [...new Map(r.steps.filter(x => !validated[x.s][x.to]).map(x => [`${x.s}:${x.to}`, { s: x.s, j: x.to }])).values()]
+      if (!todo.length) break
+      api.log(`${days} 天：计划里 ${todo.length} 项提升换一组随机种子再测一遍，用新数字重新规划`)
+      await validate(todo)
+      r = await searchPlan(P, api.signal)
+    }
+    let check = r.steps.length ? await measure(r.held, gainOf(r)) : null
+    let scale = 1
+    if (check && check.estimated > 0 && check.actual < check.estimated - 2 * check.sig.se * 24) {
+      scale = Math.max(0.2, Math.min(1, check.actual / check.estimated))
+      const sum = check.estimated
+      P = { ...P, dp: planDp.map(row => row.map(v => v * scale)), dpv: planDpv.map(row => row.map(a => a.map(v => v * scale))) }
+      r = await searchPlan(P, api.signal)
+      check = r.steps.length ? { ...(await measure(r.held, gainOf(r))), sum, scale } : null
+      api.log(`${days} 天：一起买实测只有逐项相加的 ${(scale * 100).toFixed(0)}%（提升之间有重叠），收益按这个比例打折后重新规划`)
+    }
     api.log(`规划 ${days} 天用时 ${Date.now() - ts} ms`)
     const idleRun = runPlan([], P)
     const idle = idleRun.wealth
     const mem = clone(members)
     r.held.forEach((j, s) => j && slots[s].states[j].apply(mem[slots[s].member]))
-    let check = null
-    if (r.steps.length) {
-      // measured at the precision of the baseline it is paired with
-      const f = await ev.evaluate(mem, target, picks.length ? { hours: refineHours, seeds: refineSeeds, extra, objective: "profit", signal: api.signal } : { hours, seeds, extra, objective: "profit", signal: api.signal })
-      check = { estimated: r.income - income.reduce((a, v) => a + v, 0), actual: (f.mean.profitPerHour - refBase.mean.profitPerHour) * 24, sig: paired(f.perSeed, refBase.perSeed) }
-    }
     const steps = r.steps.map(x => {
       const sl = slots[x.s]
       return {
         day: x.day, memberName: sl.memberName, slotName: sl.slotName, from: sl.states[x.from].label, to: sl.states[x.to].label,
-        cost: x.cost, how: x.how, cashBefore: x.cashBefore, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: planDp[x.s][x.to] - planDp[x.s][x.from],
+        cost: x.cost, how: x.how + unlockText(sl.states[x.to]), cashBefore: x.cashBefore, cashAfter: x.cashAfter, incomeAfter: x.incomeAfter, dProfitPerDay: P.dp[x.s][x.to] - P.dp[x.s][x.from],
         loss: x.cost - L[x.s][x.to] + L[x.s][x.from], dScore: S[x.s][x.to] - S[x.s][x.from],
       }
     })
     const final = r.held.map((j, s) => ({ j, s })).filter(x => x.j).map(({ j, s }) => ({ memberName: slots[s].memberName, slotName: slots[s].slotName, from: slots[s].states[0].label, to: slots[s].states[j].label }))
     const scoreAfter = members.map((_, k) => scores[k] + r.held.reduce((a, j, s) => a + (slots[s].member === k ? S[s][j] - S[s][0] : 0), 0))
     const perMember = members.map((_, k) => ({ name: name(k), cash: r.cash[k], income: r.incomes[k], startIncome: income[k], score: scores[k], scoreAfter: scoreAfter[k] }))
-    plans.push({ days, wealth: r.wealth, idle, gain: r.wealth - idle, incomeGain: r.income - idleRun.income, scoreGain: r.score, steps, final, check, finalIncome: r.income, perMember, members: mem })
-    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}，日利润 +${fmtM(r.income - idleRun.income)}/天，战斗评分 +${fmtScore(r.score)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
+    plans.push({ days, levelGain, wealth: r.wealth, idle, gain: r.wealth - idle, incomeGain: r.income - idleRun.income, scoreGain: r.score, steps, final, check, finalIncome: r.income, perMember, members: mem })
+    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}，日利润 +${fmtM(r.income - idleRun.income)}/天${curve ? `（另有等级提升 +${fmtM(levelGain)}/天）` : ""}，战斗评分 +${fmtScore(r.score)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
   }
-  return { keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length, refineHours, refineSeeds: refineSeeds.length, refinedCount: picks.length, refineTop, objective: mode, paybackDays: payback, scores }
+  // the table with the numbers measured again for the plans
+  for (const row of rows) {
+    if (row.guild) continue
+    const [key, jj] = row.id.split("#")
+    const s = slots.findIndex(sl => sl.key === key)
+    const j = Number(jj)
+    if (s < 0 || !validated[s][j]) continue
+    Object.assign(row, { dProfitPerDay: dp[s][j], dOwnPerDay: dpv[s][j][slots[s].member], dXpPerHour: info[s][j].dXp, significance: info[s][j].sig, validated: true, net: Object.fromEntries(horizons.map(d => [d, dp[s][j] * d - row.loss])), paybackDays: dp[s][j] > 0 ? row.loss / dp[s][j] : null })
+  }
+  rows.sort((a, b) => b.net[horizons.at(-1)] - a.net[horizons.at(-1)])
+  return { levels: growth?.report || null, keepEnd: !!params.keepEnd, baseline: baseline.mean, profitPerDay: P0, income: income.reduce((a, v) => a + v, 0), incomes: income, budget: budget.reduce((a, v) => a + v, 0), budgets: budget, names: members.map((_, k) => name(k)), tax, mirror: gp.mirror, horizons, rows, plans, hours, seeds: seeds.length, refineHours, refineSeeds: refineSeeds.length, refinedCount: picks.length, refineTop, objective: mode, paybackDays: payback, scores }
 }
 
 function fmtM(v) {

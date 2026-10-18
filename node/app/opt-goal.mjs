@@ -11,7 +11,7 @@
 import { hash53 } from "./hash.mjs"
 import { pool } from "./search.mjs"
 import { seedList } from "./evaluator.mjs"
-import { GearPrices, guildSlots, memberSlots, pricedBook } from "./opt-upgrades.mjs"
+import { GearPrices, guildSlots, memberSlots, pricedBook, SKILL_ZH } from "./opt-upgrades.mjs"
 import { optimizeConsumables } from "./opt-consumables.mjs"
 import { zh } from "./i18n.mjs"
 
@@ -19,7 +19,7 @@ const clone = v => JSON.parse(JSON.stringify(v))
 const INF = Number.POSITIVE_INFINITY
 const M = v => (Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : `${(v / 1e6).toFixed(1)}M`)
 const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
-export const SKILL_ZH = { stamina: "耐力", intelligence: "智力", attack: "攻击", melee: "近战", defense: "防御", ranged: "远程", magic: "魔法" }
+export { SKILL_ZH }
 
 /**
  * params: { members, goal (target), current (target now), extra, optimize, budgets, otherIncomes,

@@ -32,6 +32,8 @@ if (!plan.value.cash) plan.value.cash = {}
 if (!plan.value.other) plan.value.other = {}
 if (plan.value.houses == null) plan.value.houses = true
 if (plan.value.guild == null) plan.value.guild = true
+if (plan.value.levels == null) plan.value.levels = true
+if (plan.value.charms == null) plan.value.charms = true
 if (!plan.value.objective) plan.value.objective = "wealth"
 if (plan.value.paybackDays == null) plan.value.paybackDays = 180
 if (!plan.value.buyPrice) plan.value.buyPrice = "ask"
@@ -57,7 +59,7 @@ function params() {
   const p = plan.value
   return {
     members: members.value, target: target.value, extra: extra.value, hours: hours.value, seeds: seeds.value, replacements: replacements.value, optimize: optimize.value,
-    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedUnrefine ? "unrefine" : "market", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd, buyPrice: p.buyPrice, sellPrice: p.sellPrice, objective: p.objective, paybackDays: p.paybackDays,
+    houses: p.houses !== false, guild: p.guild !== false, refinedResale: p.refinedUnrefine ? "unrefine" : "market", budgets: members.value.map(m => (p.cash[m.name] || 0) * 1e6), otherIncomes: members.value.map(m => (p.other[m.name] || 0) * 1e6), horizons: p.horizons, tax: p.tax / 100, maxLevelUp: p.maxLevelUp, keepEnd: p.keepEnd, buyPrice: p.buyPrice, sellPrice: p.sellPrice, objective: p.objective, paybackDays: p.paybackDays, levels: p.levels !== false, charms: p.charms !== false,
   }
 }
 function onResult(r) {
@@ -72,6 +74,25 @@ const sign = v => (v >= 0 ? "+" : "") + money(v)
 const score = v => (v == null || !Number.isFinite(v) ? "—" : (v / 1e6).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))
 const signScore = v => (v >= 0 ? "+" : "") + score(v)
 const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
+// charm per stage and member, with the value of one level of each skill at that stage
+const charmRows = computed(() => {
+  const st = result.value?.levels?.stages || []
+  const prev = {}
+  return st.flatMap(g => g.members.map(m => {
+    const changed = prev[m.member] !== undefined && prev[m.member] !== m.charm
+    prev[m.member] = m.charm
+    return { stage: `第 ${g.from}–${g.to} 天`, name: m.name, charm: m.charm, cost: m.cost, changed, values: m.values.slice().sort((a, b) => b.perLevel - a.perLevel).map(v => `${v.name} ${sign(v.perLevel)}`).join("，") || "—" }
+  }))
+})
+
+// level growth: one row per member and skill, then the team's profit from levels alone
+const levelRows = computed(() => {
+  const L = result.value?.levels
+  if (!L) return []
+  const rows = L.members.flatMap(m => m.skills.map(s => ({ member: m.name, ...s })))
+  rows.push({ member: "全队", name: "利润/天", gain: true, at: L.gains.map(g => g.team) })
+  return rows
+})
 </script>
 
 <template>
@@ -80,11 +101,12 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
     <el-card>
       <p class="muted" style="margin-top: 0">
         先把全队每个位置能到达的状态（当前装备及其精炼版的更高强化等级、按职业的高档换装、技能 +5/+10 级、房子 +1～+3 级）逐个模拟，得到每项每天多赚多少；
-        队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 60 项，外加最好那级下面的几个中间级，比如 +14 下面的 +11～+13）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字；
+        队伍越强，单项提升占总利润的比例越小，和模拟误差差不多大，所以初筛之后，可能在规划期内回本的提升（最多 60 项，外加最好那级下面的几个中间级，比如 +14 下面的 +11～+13）会换一组随机种子、用 2 倍时长 × 4 倍次数再模拟一遍，购买计划只用复核过的数字。几百项里挑数字最高的，容易挑到运气好的，所以计划选中的提升还会再换一组种子测一遍、用新数字重新规划；最后把整套提升一起模拟，一起买明显不如逐项相加（提升之间有重叠）时，按实测比例打折再规划一次；
         再按你的现金和每天收入排出购买顺序：钱够了就买。目标可选：总资产优先（期末现金 + 身上装备、技能等级、房子等级按卖出价扣税估的价值最高）、日利润优先（期末日利润最高，花的钱要在规定天数内赚回）、战斗评分优先（期末战斗评分涨得最多）。
         中途买的过渡装备以后卖掉要付差价和卖出税，所以只有它在这段时间多赚的钱超过这些损耗时才会被安排。
         买入默认按市场最低卖价（直接买），卖出默认按最高买价（直接卖）并扣卖出税，可以改成挂单价（挂买单买、挂卖单卖，价格更好但要等成交）；过渡装备以后卖掉时的差价和税都算在损耗里。
         技能书和房子升级材料的钱不算白花：技能等级和房子等级跟装备一样计入总资产，按书和材料的买一价扣税（金币按原值）估值，所以损耗只是买卖差价和税。公会加成每人最多升到自己公会神殿的等级，花公会代币和公会币、不花金币，只在单项表里列出供参考，不进购买计划。
+        勾选「考虑战斗等级增长」时，按同步时的经验和现在在目标地图每天的经验，推算规划期内每人每项战斗等级，在几个时间点模拟只升等级的队伍，把多赚的钱算进每天收入；现在等级不够、规划期内能够上的装备（比如高档换装）也会列进来，从够等级那天起才能买。
         获得装备的成本取最便宜的路线：直接买、贤者之镜合成（+N 加一件 +(N-1) 垫子加镜子 = +(N+1)，手上的装备可以当主件或垫子）、买普通版自己精炼。
       </p>
       <div class="row" style="margin-bottom: 8px"><TargetPicker v-model="target" /></div>
@@ -134,12 +156,47 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <el-checkbox v-model="replacements">包含换装</el-checkbox>
         <el-checkbox v-model="plan.houses">包含房子</el-checkbox>
         <el-checkbox v-model="plan.guild">列出公会加成</el-checkbox>
+        <el-checkbox v-model="plan.levels">考虑战斗等级增长</el-checkbox>
+        <el-checkbox v-model="plan.charms" :disabled="!plan.levels">分阶段规划护符</el-checkbox>
         <span class="muted">成员</span>
         <el-checkbox-group v-model="optimize" size="small">
           <el-checkbox v-for="(m, i) in members" :key="m.id" :value="i">{{ m.name }}</el-checkbox>
         </el-checkbox-group>
       </div>
       <JobRunner name="upgrades" type="upgrades" :params="params" label="开始规划" @result="onResult" />
+    </el-card>
+
+    <el-card v-if="result?.levels">
+      <template #header>
+        <div class="row">
+          <b>战斗等级增长</b>
+          <span class="muted">一直在这里刷，按{{ result.levels.noExperience.length ? "" : "同步时的经验和" }}现在每天的经验推算（升级和买装备带来的经验变化不算）<template v-if="result.levels.noExperience.length">；{{ result.levels.noExperience.join("、") }} 没有当前经验数据，按整级算</template>。只靠等级多赚的钱算进每天收入，够等级才能穿的装备从够等级那天起才能买</span>
+        </div>
+      </template>
+      <el-table :data="levelRows" size="small">
+        <el-table-column prop="member" label="角色" width="90" />
+        <el-table-column prop="name" label="技能" width="70" />
+        <el-table-column label="经验/天" width="110" align="right"><template #default="{ row }">{{ row.xpPerDay == null ? "" : int(row.xpPerDay) }}</template></el-table-column>
+        <el-table-column label="现在" width="70" align="right"><template #default="{ row }">{{ row.from }}</template></el-table-column>
+        <el-table-column v-for="(t, x) in result.levels.times" :key="t" :label="`第 ${t} 天`" width="90" align="right">
+          <template #default="{ row }">
+            <template v-if="row.gain">
+              <span :class="row.at[x] >= 0 ? 'good' : 'bad'">{{ sign(row.at[x]) }}</span>
+            </template>
+            <b v-else-if="row.at[x] > row.from">{{ row.at[x] }}</b>
+            <span v-else class="muted">{{ row.at[x] }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template v-if="result.levels.stages?.length">
+        <div class="muted" style="margin: 12px 0 6px">护符：每个阶段开始时，按当时的等级模拟每个技能每升 1 级全队每天多赚多少（同一张地图上，每个人不同、越练越变），戴升级最值钱的那个；新买的护符阶段开始时付钱，期末扣税卖回</div>
+        <el-table :data="charmRows" size="small">
+          <el-table-column prop="stage" label="阶段" width="100" />
+          <el-table-column prop="name" label="角色" width="90" />
+          <el-table-column label="戴" min-width="160"><template #default="{ row }"><b v-if="row.changed">{{ row.charm }}</b><span v-else>{{ row.charm }}</span><span v-if="row.cost" class="muted">（买 {{ money(row.cost) }}）</span></template></el-table-column>
+          <el-table-column label="每升 1 级全队每天多赚" min-width="300"><template #default="{ row }">{{ row.values }}</template></el-table-column>
+        </el-table>
+      </template>
     </el-card>
 
     <el-card v-if="result?.plans">
@@ -162,9 +219,10 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
           <template v-else>
             <p>
               {{ p.days }} 天后总资产比什么都不买 <b :class="p.gain >= 0 ? 'good' : 'bad'">{{ sign(p.gain) }}</b>，
-              全部做完后全队每天多赚约 <b>{{ money(p.finalIncome - result.income) }}</b>，
+              全部做完后全队每天多赚约 <b>{{ money(p.finalIncome - result.income - (p.levelGain || 0)) }}</b>，
+              <template v-if="result.levels">到期时等级提升另外每天 <b>{{ sign(p.levelGain || 0) }}</b>，</template>
               战斗评分 <b>{{ signScore(p.scoreGain) }}</b>
-              <span v-if="p.check" class="muted">（终态整队实测 {{ sign(p.check.actual) }}/天 ± {{ money(1.96 * p.check.sig.se * 24) }}，逐项相加估计 {{ sign(p.check.estimated) }}/天）</span>
+              <span v-if="p.check" class="muted">（终态整队实测 {{ sign(p.check.actual) }}/天 ± {{ money(1.96 * p.check.sig.se * 24) }}，逐项相加估计 {{ sign(p.check.estimated) }}/天<template v-if="p.check.scale">；提升之间有重叠，一起买只有逐项相加的 {{ (p.check.scale * 100).toFixed(0) }}%，收益已按这个比例打折重新规划</template>）</span>
             </p>
             <p class="muted">每个角色只用自己的现金和自己的收入买自己的装备。
               <template v-for="x in p.perMember || []" :key="x.name">{{ x.name }}：收入 {{ money(x.startIncome) }} → {{ money(x.income) }}/天，期末现金 {{ money(x.cash) }}<template v-if="x.score != null">，战斗评分 {{ score(x.score) }} → {{ score(x.scoreAfter) }}</template>；</template>
@@ -195,7 +253,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
           <el-checkbox-group v-model="kinds" size="small">
             <el-checkbox-button v-for="k in slotNames" :key="k" :value="k">{{ k }}</el-checkbox-button>
           </el-checkbox-group>
-          <span class="muted">从当前状态一步到位；N 天净收益 = 利润/天 × N − 损耗<template v-if="result.refineSeeds">；「复核」= 用 {{ result.refineHours }} 小时 × {{ result.refineSeeds }} 次重新模拟过（{{ result.refinedCount }} 项），「初筛」的数字误差较大，不进购买计划</template></span>
+          <span class="muted">从当前状态一步到位；N 天净收益 = 利润/天 × N − 损耗<template v-if="result.refineSeeds">；「复核」= 用 {{ result.refineHours }} 小时 × {{ result.refineSeeds }} 次重新模拟过（{{ result.refinedCount }} 项），「初筛」的数字误差较大，不进购买计划；「验证」= 被购买计划选中后又换一组随机种子测过</template></span>
         </div>
       </template>
       <el-table :data="rows" size="small">
@@ -215,7 +273,7 @@ const day = d => (d < 0.05 ? "现在" : `第 ${d.toFixed(1)} 天`)
         <el-table-column prop="dScore" label="战斗评分" width="100" align="right" sortable><template #default="{ row }">{{ row.dScore == null ? "" : signScore(row.dScore) }}</template></el-table-column>
         <el-table-column prop="dOwnPerDay" label="自己/天" width="100" align="right" sortable><template #default="{ row }">{{ row.dOwnPerDay == null ? "" : sign(row.dOwnPerDay) }}</template></el-table-column>
         <el-table-column prop="dXpPerHour" label="经验/小时" width="100" align="right" sortable><template #default="{ row }">{{ row.dXpPerHour >= 0 ? "+" : "" }}{{ int(row.dXpPerHour) }}</template></el-table-column>
-        <el-table-column label="精度" width="60" align="center"><template #default="{ row }"><span :class="row.refined ? '' : 'muted'">{{ row.guild ? "" : row.refined ? "复核" : "初筛" }}</span></template></el-table-column>
+        <el-table-column label="精度" width="60" align="center"><template #default="{ row }"><span :class="row.refined ? '' : 'muted'">{{ row.guild ? "" : row.validated ? "验证" : row.refined ? "复核" : "初筛" }}</span></template></el-table-column>
         <el-table-column label="显著" width="60" align="center"><template #default="{ row }">{{ row.significance?.clearlyBetter ? "✓" : "" }}</template></el-table-column>
       </el-table>
     </el-card>

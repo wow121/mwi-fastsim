@@ -99,6 +99,24 @@ function teamItems(book, results, n) {
   return { revenue: out(acc.revenue), expenses: out(acc.expenses) }
 }
 
+/** Comparison of two independent per-seed series (any seeds): mean difference and its standard
+ *  error from both spreads. For team changes the per-seed results barely correlate with the base
+ *  (any change sends the fights down another path), so pairing does not cancel the noise and the
+ *  base's own luck shifts every difference against it the same way; compare with a base over more
+ *  seeds instead. Same shape as `paired`. */
+export function unpaired(a, b) {
+  const st = x => {
+    const n = x.length
+    const m = x.reduce((s, v) => s + v, 0) / n
+    return { n, m, v: n > 1 ? x.reduce((s, v) => s + (v - m) ** 2, 0) / (n - 1) : Infinity }
+  }
+  const A = st(a)
+  const B = st(b)
+  const mean = A.m - B.m
+  const se = Math.sqrt(A.v / A.n + B.v / B.n)
+  return { mean, se, low: mean - 1.96 * se, high: mean + 1.96 * se, clearlyBetter: mean - 1.96 * se > 0 }
+}
+
 /** Paired comparison of two per-seed series (same seeds). */
 export function paired(a, b) {
   const d = a.map((x, i) => x - b[i])
