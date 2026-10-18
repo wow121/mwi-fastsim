@@ -1,11 +1,19 @@
 // Version and release notes, read from the repository's CHANGELOG.md at build time.
 import raw from "../../CHANGELOG.md?raw"
 
-/** [{ version, date, items: [text] }], newest first. */
+/** [{ version, date, intro: [text], items: [{ text, sub: [text] }] }], newest first. Paragraphs before the
+ *  first item are the intro; indented "  - " lines are sub-items of the item above them. */
 export const releases = raw.split(/^## /m).slice(1).map(block => {
   const [head, ...lines] = block.split("\n")
   const [, version = head.trim(), date = ""] = /^(v[\w.-]+)\s*[—-]\s*(.*)$/.exec(head.trim()) || []
-  return { version, date: date.trim(), items: lines.filter(l => l.startsWith("- ")).map(l => l.slice(2).trim()) }
+  const intro = []
+  const items = []
+  for (const l of lines) {
+    if (l.startsWith("- ")) items.push({ text: l.slice(2).trim(), sub: [] })
+    else if (/^\s+- /.test(l) && items.length) items.at(-1).sub.push(l.replace(/^\s+- /, "").trim())
+    else if (l.trim() && !items.length) intro.push(l.trim())
+  }
+  return { version, date: date.trim(), intro, items }
 })
 
 export const version = releases[0]?.version || "dev"

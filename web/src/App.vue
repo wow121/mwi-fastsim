@@ -163,8 +163,14 @@ if (lastSeen.value === null) {
     <div class="muted" style="margin-top: -8px; margin-bottom: 8px">当前版本 {{ version }}{{ commit ? `（构建 ${commit}）` : "" }}</div>
     <div v-for="r in releases" :key="r.version" style="margin-bottom: 12px">
       <div style="font-weight: 600">{{ r.version }} <span class="muted" style="font-weight: normal">{{ r.date }}</span></div>
+      <div v-for="(t, i) in r.intro" :key="`p${i}`" style="margin: 4px 0; line-height: 1.7">{{ t }}</div>
       <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.7">
-        <li v-for="(t, i) in r.items" :key="i">{{ t }}</li>
+        <li v-for="(t, i) in r.items" :key="i">
+          {{ t.text }}
+          <ul v-if="t.sub.length" style="margin: 2px 0; padding-left: 18px">
+            <li v-for="(x, j) in t.sub" :key="j">{{ x }}</li>
+          </ul>
+        </li>
       </ul>
     </div>
   </el-dialog>
