@@ -1,5 +1,6 @@
 // Background jobs in the browser (same interface as node/app/jobs.mjs); finished jobs are kept in
 // IndexedDB so results survive a reload. A reload interrupts running jobs.
+import { calibration, paramsKey, trackProgress } from "@app/job-progress.mjs"
 import { kvDel, kvGet, kvKeys, kvSet } from "./kv.js"
 
 export class Jobs {
@@ -44,10 +45,20 @@ export class Jobs {
     return !!j
   }
 
+  finished(type) {
+    return [...this.jobs.values()].filter(j => j.type === type && j.status === "done").sort((a, b) => b.createdAt - a.createdAt)
+  }
+
+  prior(key) {
+    return [...this.jobs.values()].filter(j => j.key === key && j.status === "done" && j.work > 0).sort((a, b) => b.createdAt - a.createdAt)[0] || null
+  }
+
   start(type, title, params, run) {
     const id = String(this.next++)
     const controller = new AbortController()
-    const j = { id, type, title, params, status: "running", createdAt: Date.now(), progress: { done: 0, total: 0, stage: "准备中" }, log: [], result: null, controller }
+    const key = paramsKey(type, params)
+    const prior = this.prior(key)
+    const j = { id, type, title, params, key, status: "running", createdAt: Date.now(), progress: { done: 0, total: 0, stage: "准备中" }, log: [], result: null, controller }
     this.jobs.set(id, j)
     const api = {
       signal: controller.signal,
@@ -58,10 +69,12 @@ export class Jobs {
       },
       partial: (result) => { j.result = result },
     }
+    trackProgress(j, api, prior, calibration(this.finished(type)))
     ;(async () => {
       try {
         j.result = await run(params, api)
         j.status = controller.signal.aborted ? "cancelled" : "done"
+        if (j.status === "done") api.finish()
       } catch (e) {
         j.status = controller.signal.aborted ? "cancelled" : "error"
         j.error = String(e?.stack || e)

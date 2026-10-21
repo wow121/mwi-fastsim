@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from "vue"
 import { call } from "../api.js"
+import JobProgress from "./JobProgress.vue"
 
 // Starts a server job, polls it, exposes the latest result. Remembers the last job per `name`
 // so the page shows it again after navigation.
@@ -48,7 +49,7 @@ const statusText = { running: "运行中", done: "完成", error: "出错", canc
         <template v-if="job.finishedAt"> · 用时 {{ ((job.finishedAt - job.createdAt) / 1000).toFixed(1) }} 秒</template>
       </span>
     </div>
-    <el-progress v-if="job?.status === 'running' && job.progress?.total" :percentage="Math.round((100 * job.progress.done) / job.progress.total)" style="margin-top: 8px" />
+    <JobProgress v-if="job?.status === 'running'" :progress="job.progress" />
     <el-alert v-if="job?.status === 'error'" type="error" :title="job.error?.split('\n')[0]" :closable="false" style="margin-top: 8px" />
     <el-collapse v-if="job?.log?.length" style="margin-top: 8px">
       <el-collapse-item :title="`日志（${job.log.length}）`">

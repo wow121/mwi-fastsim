@@ -5,7 +5,7 @@
 // income), purchases happen as soon as the cash is there, and the objective is the wealth at the
 // horizon (cash + resale value of held gear). So a temporary +12 that is later sold for a +14 pays
 // its spread and sales tax twice, and the plan only does that when the earlier profit is worth it.
-import { pool } from "./search.mjs"
+import { nestedApi, pool } from "./search.mjs"
 import { seedList, unpaired, withRunCache } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 
@@ -724,6 +724,11 @@ async function levelGrowth(ev, members, baseline, o, api) {
     mem.forEach((c, k) => { c.levels = { ...c.levels, ...lv[k] } })
     return mem
   }
+  // sim-hours still ahead: charm stages left (a 4× base each, at most one measurement per skill not
+  // measured yet) and the level growth (a 4× base and one run per time point)
+  const unit = o.refineHours * o.refineSeeds.length
+  const worthRun = o.refineHours * Math.min(o.refineSeeds.length, Math.max(8, o.refineSeeds.length / 2))
+  const ahead = (stages, measured, points = times.length) => stages * 4 * unit + (stages ? o.optimize.length * SKILL_KEYS.length - measured : 0) * worthRun + (points ? points + 4 : 0) * unit
 
   const charges = members.map(() => [])
   const stages = []
@@ -750,6 +755,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
         jobs.push({ k, x })
       }
     }
+    api.remaining?.(jobs.length * quick.hours * quick.seeds.length + ahead(times.length, 0))
     let done = 0
     await pool(jobs, 32, async ({ k, x }) => {
       const mem = clone(members)
@@ -773,6 +779,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
     // it, and each measurement is a big share of the whole run)
     const worth = members.map(() => ({ value: {}, se: {}, step: {}, lv: {} }))
     for (let x = 0; x + 1 < bounds.length; x++) {
+      api.remaining?.(ahead(bounds.length - 1 - x, worth.reduce((n, w) => n + Object.keys(w.value).length, 0)))
       const a = bounds[x]
       const b = bounds[x + 1]
       const lv = members.map((_, k) => levelsAt(k, a))
@@ -849,6 +856,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
   const keys = [...new Set(configs.map(c => JSON.stringify(c)).filter(c => c !== start))]
   const noXp = members.map((c, k) => (c.experience ? null : o.name(k))).filter(Boolean)
   api.log(`考虑战斗等级增长：按${noXp.length ? "" : "同步时的经验和"}现在在这里每天的经验推算${noXp.length ? `（${noXp.join("、")} 没有当前经验数据，按整级算）` : ""}，模拟 ${keys.length} 个时间点的等级`)
+  api.remaining?.(ahead(0, 0, keys.length))
   let done = 0
   const total = keys.length ? keys.length + 1 : 0
   const base = keys.length ? await ev.evaluate(members, o.target, baseCfg) : null
@@ -922,17 +930,37 @@ export async function adviseUpgrades(ev0, params, api) {
   // seeds, so its base (and the first charm stage's) is the re-check's base again
   const refineHours = Math.min(48, hours * 4)
   const refineSeeds = seedList(33333, Math.min(32, seeds.length * 2))
-  const growth = params.levels === false ? null : await levelGrowth(ev, members, baseline, { maps, horizons, target, hours, refineHours, refineSeeds, extra, name, gp, optimize, charms: params.charms !== false }, api)
+  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 30)))
+  const gjobs = params.guild === false ? [] : guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 3 }).flatMap(g => g.states.slice(1).map((st, k) => ({ g, j: k + 1, st })))
+  // sim-hours still ahead from a phase on (screen, recheck, guild, plan with `left` horizons to go);
+  // the re-check and the plans' validations are guesses until their lists exist. The 4× bases are
+  // counted though some come from the run cache
+  const screenRun = hours * seeds.length
+  const refineRun = refineHours * refineSeeds.length
+  const ahead = (phase, nJobs, nPicks = Math.min(nJobs, refineTop + 10), left = horizons.length) => {
+    const at = ["screen", "recheck", "guild", "plan"].indexOf(phase)
+    let w = 0
+    if (at <= 0) w += nJobs * screenRun
+    if (at <= 1 && nPicks) w += (nPicks + 4) * refineRun
+    if (at <= 2) w += gjobs.length * screenRun
+    // per horizon: the states of the plan not validated yet and up to two whole-state checks
+    return w + ((left === horizons.length ? 8 : 0) + left * (2 + Math.min(nPicks, 10))) * refineRun
+  }
+  const slotsFor = (gain, unlock) => optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, {
+    maxSpend: budget[idx] + Math.max(0, income[idx] + gain(idx)) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3, fair, ...unlock,
+  }))
+  const countJobs = sl => sl.reduce((a, x) => a + x.states.length - 1, 0)
+  // before the level growth: the states counted as if every level requirement were met by then
+  const growthApi = nestedApi(api, params.levels === false ? 0 : ahead("screen", countJobs(slotsFor(() => 0, { unlockDay: () => 0, unlockBy: 1 }))))
+  const growth = params.levels === false ? null : await levelGrowth(ev, members, baseline, { maps, horizons, target, hours, refineHours, refineSeeds, extra, name, gp, optimize, charms: params.charms !== false }, growthApi)
   const curve = growth?.curve || null
   const maxGain = k => Math.max(0, ...(curve?.[k] || [{ g: 0 }]).map(p => p.g))
-  const slots = optimize.flatMap(idx => memberSlots(ev.ctx, gp, members, idx, {
-    maxSpend: budget[idx] + Math.max(0, income[idx] + maxGain(idx)) * horizons.at(-1), maxLevelUp: params.maxLevelUp || 6, replacements: params.replacements !== false, houses: params.houses !== false, maxHouseUp: params.maxHouseUp ?? 3, fair,
-    unlockDay: growth?.unlockDay, unlockBy: growth ? horizons.at(-1) : 0,
-  }))
+  const slots = slotsFor(maxGain, { unlockDay: growth?.unlockDay, unlockBy: growth ? horizons.at(-1) : 0 })
   const scores = members.map(c => combatScore(maps, c, fair))
   api.log(`战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：${members.map((_, k) => `${name(k)} ${fmtScore(scores[k])}`).join("，")}`)
   const jobs = slots.flatMap((sl, s) => sl.states.slice(1).map((st, k) => ({ s, j: k + 1, st })))
   api.log(`${slots.length} 个位置，共 ${jobs.length} 个可达状态需要模拟`)
+  api.remaining?.(ahead("screen", jobs.length))
   let done = 0
   const evals = await pool(jobs, 32, async ({ s, j, st }) => {
     const mem = clone(members)
@@ -963,7 +991,6 @@ export async function adviseUpgrades(ev0, params, api) {
   // with those numbers only; the rest stay in the table as screening results.
   // how long an upgrade has to pay off: the longest horizon (+ the payback days when aiming at income)
   const H = horizons.at(-1) + (mode === "income" ? payback : 0)
-  const refineTop = Math.max(0, Math.floor(Number(params.refineTop ?? 30)))
   const optimistic = (s, j) => (dp[s][j] + 3 * (info[s][j]?.sig?.se ?? 0) * 24) * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
   const screenNet = (s, j) => dp[s][j] * H - (pay[s][0][j].cost - L[s][j] + L[s][0])
   const hopeful = jobs.filter(({ s, j }) => pay[s][0][j].cost < INF && optimistic(s, j) > 0)
@@ -984,6 +1011,7 @@ export async function adviseUpgrades(ev0, params, api) {
       .sort((p, q) => lvl(q.st) - lvl(p.st)).slice(0, 4)
   })
   const picks = [...top, ...below]
+  api.remaining?.(ahead("recheck", jobs.length, picks.length))
   const refined = slots.map(sl => sl.states.map(() => false))
   const planDp = slots.map(sl => sl.states.map(() => 0))
   const planDpv = slots.map(sl => sl.states.map(() => members.map(() => 0)))
@@ -1034,9 +1062,8 @@ export async function adviseUpgrades(ev0, params, api) {
     })
   }))
   // guild buffs: guild tokens and credits, not coins -> listed for reference, not in the coin plans
-  if (params.guild !== false) {
-    const gs = guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 3 })
-    const gjobs = gs.flatMap(g => g.states.slice(1).map((st, k) => ({ g, j: k + 1, st })))
+  if (gjobs.length) {
+    api.remaining?.(ahead("guild", jobs.length, picks.length))
     done = 0
     const gevals = await pool(gjobs, 32, async ({ g, j, st }) => {
       const mem = clone(members)
@@ -1096,8 +1123,9 @@ export async function adviseUpgrades(ev0, params, api) {
     const f = await ev.evaluate(mem, target, { ...checkCfg, signal: api.signal })
     return { estimated, actual: (f.mean.profitPerHour - checkBase.mean.profitPerHour) * 24, sig: unpaired(f.perSeed, checkBase.perSeed) }
   }
-  for (const days of horizons) {
+  for (const [x, days] of horizons.entries()) {
     if (api.signal.aborted) throw new Error("cancelled")
+    api.remaining?.(ahead("plan", jobs.length, picks.length, horizons.length - x))
     api.progress(0, 1, `规划 ${days} 天`)
     let P = { slots, dp: planDp, dpv: planDpv, L, Lend, S, pay, budget, income, days, mode, payback, curve, charges: growth?.charges }
     const levelGain = members.reduce((a, _, k) => a + gainAt(curve?.[k], days), 0)

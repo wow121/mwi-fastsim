@@ -27,6 +27,11 @@ const MAX_LEVEL = 1000
 const CONCURRENCY = 32
 const SLOT_ZH = { weapon: "武器", off_hand: "副手", head: "头部", body: "身体", legs: "腿部", hands: "手部", feet: "脚部", back: "背部", neck: "项链", earrings: "耳环", ring: "戒指", pouch: "袋子", charm: "护符", trinket: "饰品" }
 const BUY_LEVELS = [0, 5, 8, 10, 12, 14]
+// progress estimates: rate() calls of one level search (doubling + binary), share of a pick's top
+// candidates that pass the screen and get one, candidate counts before a phase has been seen
+const SEARCH_RATES = 10
+const EXACT_SHARE = 0.5
+const GUESS = { abilities: 60, swaps: 40, buys: 300 }
 // task badges do nothing in the labyrinth
 const LAB_SLOTS = EQUIPMENT_SLOTS.filter(s => s !== "trinket")
 
@@ -64,6 +69,18 @@ class Lab {
     this.hours = Number(params.hours || 12)
     this.seeds = seedList(Number(params.seedBase || 31337), Number(params.seeds || 2))
     this.cache = new Map()
+    // candidate counts of the last abilities / swaps / purchases phases (for progress estimates)
+    this.seen = { ...GUESS }
+  }
+
+  /** Planned sim-hours of maxLevel(). */
+  searchWork() {
+    return SEARCH_RATES * this.hours * this.seeds.length
+  }
+
+  /** Planned sim-hours of pick() over n candidates (screen = 3 levels at half the hours, one seed). */
+  pickWork(n, keep = 3) {
+    return n ? (n + 1) * 3 * (this.hours / 2) + EXACT_SHARE * keep * this.searchWork() : 0
   }
 
   /** { attempts, wins, clearTime } summed over the seeds at one room level. */
@@ -239,6 +256,7 @@ async function optimizeAbilities(lab, cur, monster, label) {
     lab.api.log(`  ${label}：${mp.className}已学技能 ${poolH.length} 个（${poolH.map(h => zh(lab.maps, h)).join("、") || "无"}），${mp.slots} 个技能格，没有可试的组合`)
     return { cur, changed: false }
   }
+  lab.seen.abilities = cands.length
   lab.api.progress(0, cands.length, `${label} · 技能（${mp.className}，${cands.length} 个方案）`)
   const r = await lab.pick(cur, cands, monster, 4)
   const tops = r.top.map(c => `${names(c)}${c.best ? ` ${c.best.level} 级` : ""}`).join("；")
@@ -279,6 +297,7 @@ async function swapAbilities(lab, cur, monster, label) {
       }
     if (!cands.length) break
     lab.api.progress(0, cands.length, `${label} · 逐格换技能（${cands.length} 个方案）`)
+    lab.seen.swaps = cands.length
     const r = await lab.pick(cur, cands, monster, 4)
     if (!r.win) break
     const was = cur.cfg.abilities?.[r.win.i]?.abilityHrid
@@ -339,6 +358,7 @@ async function purchases(lab, cur, monster, gp, owned, label, maxSpend) {
       cands.push({ cfg: c, slot: `ability${i}`, slotName: `技能 ${i + 1}`, h: a.abilityHrid, n: to, from, cost, how: `${n} 本${zh(maps, b.item)}`, label: `${zh(maps, a.abilityHrid)} Lv.${from} → ${to}` })
     }
   })
+  lab.seen.buys = cands.length
   if (!cands.length) return []
   lab.api.progress(0, cands.length, `${label} · 可买装备和技能书（${cands.length} 个）`)
   const base = await lab.screen(cur.cfg, monster, cur.best.level)
@@ -428,24 +448,50 @@ export async function optimizeLabyrinth(ev, params, api) {
   // setting = room level - effective level + 1
   const setting = level => level - effective + 1
   const results = []
+
+  // work still ahead (sim-hours): the current monster's phases from `at` on, [current loadout,
+  // (gear, abilities, swaps) x 2 rounds, purchases + game setting], then the monsters after it at the
+  // average of those done so far (before any is done: this one's plan)
+  const phases = owned => {
+    const gear = LAB_SLOTS.reduce((a, s) => a + lab.pickWork(owned[s].length * (s === "weapon" ? 1 + owned.off_hand.length : 1)), 0)
+    const round = [gear, lab.pickWork(lab.seen.abilities, 4), 2 * lab.pickWork(lab.seen.swaps, 4)]
+    return [lab.searchWork(), ...round, ...round, (gp ? lab.pickWork(lab.seen.buys, 6) : 0) + lab.hours * lab.seeds.length]
+  }
+  const spent = []
+  let plan = []
+  let i = 0
+  const ahead = at => {
+    const sum = a => a.reduce((x, y) => x + y, 0)
+    const per = spent.length ? sum(spent) / spent.length : sum(plan)
+    api.remaining?.(sum(plan.slice(at)) + (monsters.length - i - 1) * per)
+  }
+
   let hint = Math.max(1, effective)
-  for (const [i, monster] of monsters.entries()) {
+  for (i = 0; i < monsters.length; i++) {
+    const monster = monsters[i]
+    const start = ev.simHours
     const name = zh(maps, monster)
     const label = `${i + 1}/${monsters.length} ${name}`
     const room = game?.monsters?.[monster]
     const base = labConfig(member, room)
     const owned = ownedBySlot(maps, base)
+    plan = phases(owned)
+    ahead(0)
     api.progress(0, 1, `${label} · 现在的配装`)
     const current = await lab.maxLevel(base, monster, hint)
     let cur = { cfg: base, best: current }
     for (let round = 0; round < 2; round++) {
+      ahead(1 + 3 * round)
       const g = await optimizeGear(lab, cur, monster, owned, label)
+      ahead(2 + 3 * round)
       const a = await optimizeAbilities(lab, g.cur, monster, label)
+      ahead(3 + 3 * round)
       const w = await swapAbilities(lab, a.cur, monster, label)
       cur = w.cur
       if (!g.changed && !a.changed && !w.changed) break
     }
     hint = cur.best.level || hint
+    ahead(7)
     const buys = gp ? await purchases(lab, cur, monster, gp, owned, label, maxSpend) : []
     const gameSetting = room?.skip ?? null
     const atGame = gameSetting == null ? null : await lab.rate(base, monster, Math.max(1, effective + gameSetting - 1))
@@ -466,6 +512,8 @@ export async function optimizeLabyrinth(ev, params, api) {
     results.push(r)
     api.log(`${name}（${r.loadoutName || "无配装"}）：现在设置 ${gameSetting == null ? "未设" : signed(gameSetting)}；现在的配装推荐 ${signed(r.current.setting)}，换装换技能后推荐 ${signed(r.best.setting)}${buys[0] ? `；买 ${buys[0].label} 可到 ${signed(setting(buys[0].level))}` : ""}`)
     api.partial({ results, threshold: lab.threshold, effective, combatLevel })
+    spent.push(ev.simHours - start)
+    ahead(plan.length)
   }
   api.log(`完成，共模拟 ${ev.sims} 次`)
   return { results, threshold: lab.threshold, memberName: member.name, effective, combatLevel, crates }

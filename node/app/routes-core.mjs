@@ -15,6 +15,7 @@ import { gearCost } from "./gear-cost.mjs"
 import { statValue } from "./opt-statvalue.mjs"
 import { scrollValue } from "./opt-scrolls.mjs"
 import { EMPTY_IRONCOW_TEAM, IRONCOW_JOBS, ironcowRoutes } from "./ironcow/jobs.mjs"
+import { countRuns } from "./job-progress.mjs"
 
 export { EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes }
 
@@ -114,9 +115,11 @@ export function jobRoutes(jobs, st, method, p, body) {
     const t = JOB_TYPES[body.type]
     if (!t) throw new Error(`unknown job type ${body.type}`)
     // prices pinned at the start: the market refresh replaces `st.book`, and a job's comparisons
-    // must not mix two price lists
-    const ev = Object.create(st.ev, { ctx: { value: { ...st.ev.ctx } } })
-    const j = jobs.start(body.type, body.title || t.title, body.params, (params, a) => t.run(ev, params, a))
+    // must not mix two price lists. The job's own engine handle counts its simulated hours (progress).
+    const j = jobs.start(body.type, body.title || t.title, body.params, (params, a) => {
+      const ev = Object.create(st.ev, { ctx: { value: { ...st.ev.ctx, rust: countRuns(st.ev.ctx.rust, a.work) } } })
+      return t.run(ev, params, a)
+    })
     return { id: j.id }
   }
   const jm = /^\/api\/jobs\/(\w+)(\/cancel)?$/.exec(p)

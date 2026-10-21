@@ -10,7 +10,7 @@
 // a better item lose before its trigger is ever tuned. Each round starts with team-wide swaps (an
 // item held by several members replaced for all of them at once), whose gain is large enough to
 // show above the noise where a single member's share would not.
-import { confirmAdaptive, halving } from "./search.mjs"
+import { confirmAdaptive, confirmWork, halving, halvingWork } from "./search.mjs"
 import { defaultTriggers, teamDTO, triggersFor } from "./model.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
@@ -101,6 +101,8 @@ function swapTriggers(m, member, from, to) {
 }
 
 const CARRIED = "（沿用原触发）"
+// share of searches whose winner looks clearly better and goes on to the (costly) confirmation
+const CONFIRM_SHARE = 0.5
 
 /** params: { members, target, extra, objective, optimize, rounds, swapItems, allowItems? (candidate items; default all) } */
 export async function optimizeConsumables(ev, params, api) {
@@ -120,6 +122,39 @@ export async function optimizeConsumables(ev, params, api) {
     .filter(h => !params.allowItems || params.allowItems.includes(h))]))
   // 24 h × 32 runs: with 8 the end check was about a coin flip for small gains
   const finalSeeds = seedList(55511, 32)
+  const FINAL = 24 * finalSeeds.length
+  // items held by two or more members (team-wide swaps)
+  const shared = kind => [...new Set(optimize.flatMap(i => (members[i][kind] || []).filter(Boolean)))]
+    .map(from => ({ from, who: optimize.filter(i => (members[i][kind] || []).includes(from)) }))
+    .filter(x => x.who.length > 1)
+  const slotCount = (idx, kind) => Math.min(3, infos[idx].slots[kind] || 1)
+
+  // work still ahead (sim-hours), for the overall progress. A round's plan is one entry per step: a team
+  // swap [halving, confirm] or a member slot [item halving, confirm, trigger halving, fine halving, confirm],
+  // estimated from the current setup; later rounds are taken to be like this one.
+  const sum = a => a.flat().reduce((x, y) => x + y, 0)
+  const conf = stages => CONFIRM_SHARE * confirmWork(stages, 1)
+  const roundPlan = () => {
+    const out = []
+    if (swapItems && optimize.length > 1)
+      for (const [kind] of KINDS) for (const _ of shared(kind)) out.push([halvingWork(pool[kind].length + 1, teamStages), conf(teamStages)])
+    for (const idx of optimize)
+      for (const [kind] of KINDS)
+        for (let slot = 0; slot < slotCount(idx, kind); slot++) {
+          const h = members[idx][kind]?.[slot]
+          const item = swapItems ? [halvingWork(pool[kind].length + 1, itemStages), conf(itemStages)] : [0, 0]
+          const trig = h || swapItems ? [halvingWork(3 + (h ? templates(m, h, infos[idx]).length : 18), trigStages), halvingWork(4, [trigStages[1]]), conf(trigStages)] : [0, 0, 0]
+          out.push([...item, ...trig])
+        }
+    return out
+  }
+  let plan = roundPlan()
+  let step = -1
+  let round = 1
+  // `k` parts of the current step done
+  const ahead = (k = 0) => api.remaining?.(sum(plan[step]?.slice(k) || []) + sum(plan.slice(step + 1)) + (rounds - round) * sum(plan) + FINAL)
+  api.remaining?.(FINAL + rounds * sum(plan) + FINAL)
+
   const baseline = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   api.log(`基准：${fmt(baseline.value, objective)}`)
   const changes = []
@@ -137,17 +172,18 @@ export async function optimizeConsumables(ev, params, api) {
     return null
   }
 
-  for (let round = 1; round <= rounds; round++) {
+  for (; round <= rounds; round++) {
     let changed = false
+    plan = roundPlan()
+    step = -1
+    ahead()
 
     // 0) team-wide swaps: an item held by two or more members, replaced for all of them
     if (swapItems && optimize.length > 1) {
       for (const [kind, , kindName] of KINDS) {
-        const held = [...new Set(optimize.flatMap(i => (members[i][kind] || []).filter(Boolean)))]
-          .map(from => ({ from, who: optimize.filter(i => (members[i][kind] || []).includes(from)) }))
-          .filter(x => x.who.length > 1)
-        for (const { from, who } of held) {
+        for (const { from, who } of shared(kind)) {
           if (api.signal.aborted) throw new Error("cancelled")
+          step++
           const cands = [{ key: from, members: clone(members), incumbent: true }]
           for (const to of pool[kind]) {
             if (to === from) continue
@@ -165,13 +201,17 @@ export async function optimizeConsumables(ev, params, api) {
             }
           }
           const where = `全队 · ${kindName} · ${zh(m.$e, from)}`
+          if (plan[step]) plan[step][0] = halvingWork(cands.length, teamStages)
+          ahead()
           const ranked = await halving(ev, cands, {
             ...common,
             stages: teamStages,
             seedBase: 500 * round + (kind === "food" ? 0 : 11) + pool[kind].indexOf(from),
             onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 全队换药`),
           })
+          ahead(1)
           const best = await confirmed(ranked, teamStages, `${where} · 全队换药`)
+          ahead(2)
           if (best) {
             members = best.members
             changed = true
@@ -187,9 +227,9 @@ export async function optimizeConsumables(ev, params, api) {
     for (const idx of optimize) {
       const who = members[idx].name || `队员${idx + 1}`
       for (const [kind, , kindName] of KINDS) {
-        const slotCount = Math.min(3, infos[idx].slots[kind] || 1)
-        for (let slot = 0; slot < slotCount; slot++) {
+        for (let slot = 0; slot < slotCount(idx, kind); slot++) {
           if (api.signal.aborted) throw new Error("cancelled")
+          step++
           const cur = members[idx][kind]?.[slot] || ""
           const where = `${who} · ${kindName} ${slot + 1}`
 
@@ -208,13 +248,17 @@ export async function optimizeConsumables(ev, params, api) {
                 cands.push({ key: v.carried ? h + CARRIED : h, hrid: h, carried: v.carried, members: mem })
               }
             }
+            if (plan[step]) plan[step][0] = halvingWork(cands.length, itemStages)
+            ahead()
             const ranked = await halving(ev, cands, {
               ...common,
               stages: itemStages,
               seedBase: 400 * round + idx * 31 + slot + (kind === "food" ? 0 : 7),
               onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 选药`),
             })
+            ahead(1)
             const best = await confirmed(ranked, itemStages, `${where} · 选药`)
+            ahead(2)
             if (best) {
               members = best.members
               changed = true
@@ -248,15 +292,21 @@ export async function optimizeConsumables(ev, params, api) {
               return { key: v.label, label: v.label, variant: v, members: mem, incumbent: i === 0 }
             })
           }
-          let ranked = await halving(ev, mk(base), {
+          const trigCands = mk(base)
+          if (plan[step]) plan[step][2] = halvingWork(trigCands.length, trigStages)
+          ahead(2)
+          let ranked = await halving(ev, trigCands, {
             ...common,
             stages: trigStages,
             seedBase: 300 * round + idx * 17 + slot + (kind === "food" ? 0 : 5),
             onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · ${name} 触发`),
           })
           const fine = refineAround(ranked[0].variant, infos[idx])
+          ahead(3)
           if (fine.length) ranked = await halving(ev, mk([base[0], ranked[0].variant, ...fine]), { ...common, stages: [trigStages[1]], seedBase: 900 + idx })
+          ahead(4)
           const best = await confirmed(ranked, trigStages, `${where} · ${name} 触发`)
+          ahead(5)
           if (best) {
             members = best.members
             changed = true
@@ -270,6 +320,7 @@ export async function optimizeConsumables(ev, params, api) {
     if (!changed) break
   }
 
+  api.remaining?.(FINAL)
   const final = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   const improvement = paired(final.perSeed, baseline.perSeed)
   if (!changes.length || improvement.mean <= 0) {

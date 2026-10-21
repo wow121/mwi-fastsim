@@ -11,7 +11,7 @@
 // All of that is decided on one set of runs, so the result is checked on fresh runs at the end (and
 // the trimming undone when it fails there).
 import { hash53 } from "./hash.mjs"
-import { pool } from "./search.mjs"
+import { nestedApi, pool } from "./search.mjs"
 import { seedList } from "./evaluator.mjs"
 import { GearPrices, guildSlots, memberSlots, pricedBook, SKILL_ZH } from "./opt-upgrades.mjs"
 import { optimizeConsumables } from "./opt-consumables.mjs"
@@ -75,13 +75,14 @@ export async function planGoal(ev, params, api) {
 
   // consumables on the target (item swap + triggers), before any upgrade
   const consumableChanges = []
-  const tuneConsumables = async (label, guard) => {
+  // after: sim-hours of the goal's own work once it returns
+  const tuneConsumables = async (label, guard, after) => {
     if (!useConsumables) return
     const before = members
     api.log(`${label}：在目标上优化药品`)
-    const res = await optimizeConsumables(ev, { members: config(), target: goal, extra, objective: "profit", rounds: 1, swapItems: true, optimize }, {
-      signal: api.signal, progress: (d, t, s) => api.progress(d, t, `药品 · ${s}`), log: m => api.log(`  [药品] ${m}`), partial: () => {},
-    })
+    const res = await optimizeConsumables(ev, { members: config(), target: goal, extra, objective: "profit", rounds: 1, swapItems: true, optimize }, nestedApi(api, after, {
+      progress: (d, t, s) => api.progress(d, t, `药品 · ${s}`), log: m => api.log(`  [药品] ${m}`), partial: () => {},
+    }))
     if (res.unchanged) return
     // keep food / drinks / consumable triggers, not the (temporary) upgrades inside config()
     members = members.map((c, k) => ({ ...c, food: res.members[k].food, drinks: res.members[k].drinks, triggerMap: { ...(c.triggerMap || {}), ...pickItems(res.members[k].triggerMap) } }))
@@ -137,7 +138,30 @@ export async function planGoal(ev, params, api) {
   }
   api.log(`${slots.length} 个装备 / 技能书 / 房子${params.guild ? " / 公会" : ""}位置可提升${useLevels ? "，另加战斗等级" : ""}`)
 
-  await tuneConsumables("开始")
+  // sim-hours still ahead: attempts of at least 8 greedy steps (the step count varies a lot), 3 bisection
+  // attempts after the grid, then the finish. A step's work and the consumables' are guesses (a step screens
+  // every candidate, reviews the best 16 on long runs) until measured; measured, they are not calibrated.
+  const grid = params.timeGrid || [0, 7, 30, 90, 180]
+  const cost = c => c.hours * c.seeds.length
+  const work = () => api.workDone?.() ?? 0
+  let consWork = useConsumables ? 20 * cost(long) : 0
+  const nCands = () => slots.reduce((a, sl) => a + sl.states.length - 1, 0) + charmOpts.reduce((a, o) => a + (o?.length || 0), 0)
+  const finishWork = () => consWork + 11 * cost(long) + 2 * cost(verify)
+  const measured = { steps: 0, work: 0, attempts: 0 }
+  const stepWork = () => (measured.steps ? measured.work / measured.steps : nCands() * cost(quick) + 16 * cost(long))
+  const perAttempt = () => Math.max(8, measured.attempts ? measured.steps / measured.attempts : 0)
+  // the bisection and the finish only follow a hit: half weight until the grid has one
+  let anyHit = false
+  // (before a hit, `attempts` counts the 3 bisection attempts)
+  const ahead = (attempts, steps = 0) => {
+    if (anyHit) return (attempts * perAttempt() + steps) * stepWork() + finishWork()
+    return ((attempts - 3) * perAttempt() + steps) * stepWork() + 0.5 * (3 * perAttempt() * stepWork() + finishWork())
+  }
+  const charmWork = useLevels && params.charms !== false ? optimize.length * SKILLS.length * 6 * cost(main) : 0
+  api.remaining?.(consWork + charmWork + ahead(grid.length + 3))
+  const w0 = work()
+  await tuneConsumables("开始", null, charmWork + ahead(grid.length + 3))
+  if (useConsumables && work() > w0) consWork = work() - w0
   const ok = st => st.deaths <= maxDeaths + 1e-9 && st.profit > ref
   const fmtT = T => (Number.isInteger(T) ? String(T) : T.toFixed(1))
   const spent = members.map(() => 0)
@@ -169,6 +193,7 @@ export async function planGoal(ev, params, api) {
       }
       charmOpts[k] = list
     }
+    api.remaining?.(jobs.length * cost(main) + ahead(grid.length + 3))
     let done = 0
     await pool(jobs, 48, async ({ k, o }) => {
       const mem = clone(members)
@@ -182,7 +207,8 @@ export async function planGoal(ev, params, api) {
     }
   }
   // one attempt: from scratch, with T days of cash / income / experience; greedy on the target
-  const attempt = async (T) => {
+  // (`after`: attempts guessed to follow it)
+  const attempt = async (T, after) => {
     held.fill(0)
     spent.fill(0)
     charmSel.fill(0)
@@ -191,9 +217,11 @@ export async function planGoal(ev, params, api) {
     const log = []
     let why = ""
     let checked = null
+    const w0 = work()
     let curMain = stat(await run(config(), goal, main))
     for (let r = 0; r < maxSteps; r++) {
       if (api.signal.aborted) throw new Error("cancelled")
+      api.remaining?.(ahead(after, Math.max(1, perAttempt() - r)), { measured: measured.steps > 0 })
       if (curMain.deaths <= maxDeaths + 1e-9 && curMain.profit > ref) {
         const c = stat(await run(config(), goal, long))
         // the search ran on `main` and keeps passing `long` by luck now and then (deaths this rare
@@ -335,6 +363,9 @@ export async function planGoal(ev, params, api) {
     }
     const last = checked || curMain
     api.log(`试 ${fmtT(T)} 天（可花 ${optimize.map(k => `${name(k)} ${M(budgetAt(k, T))}`).join("，")}${useLevels ? `；等级 ${optimize.map(k => SKILLS.filter(s => lv[k][s] > lv0[k][s]).map(s => `${SKILL_ZH[s]}+${lv[k][s] - lv0[k][s]}`).join("/") || "不变").join("，")}` : ""}）：${checked ? "能达标" : `达不到${why ? `（${why}）` : ""}`}，${log.length} 步，死亡 ${last.deaths.toFixed(3)}/小时，${M(last.profit)}/天`)
+    measured.attempts++
+    measured.steps += log.length + 1 // the last step screens too, then stops
+    measured.work += work() - w0
     return { T, checked, steps: log, held: [...held], lv: lv.map(x => ({ ...x })), spent: [...spent], charmSel: [...charmSel] }
   }
   const restore = a => {
@@ -346,10 +377,11 @@ export async function planGoal(ev, params, api) {
   // shortest T: coarse grid, then bisection between the last miss and the first hit
   let hit = null
   let lo = 0
-  for (const T of params.timeGrid || [0, 7, 30, 90, 180]) {
-    const a = await attempt(T)
+  for (const [i, T] of grid.entries()) {
+    const a = await attempt(T, grid.length - i - 1 + 3)
     if (a.checked) {
       hit = a
+      anyHit = true
       break
     }
     lo = T
@@ -357,11 +389,13 @@ export async function planGoal(ev, params, api) {
   if (hit && hit.T > 0) {
     let hiT = hit.T
     let loT = lo === hit.T ? 0 : lo
+    let n = 0
     while (hiT - loT > Math.max(1, hiT * 0.08)) {
       const mid = (loT + hiT) / 2
-      const a = await attempt(mid)
+      const a = await attempt(mid, Math.max(0, 2 - n++))
       if (a.checked) {
         hit = a
+      anyHit = true
         hiT = mid
       } else loT = mid
     }
@@ -374,11 +408,12 @@ export async function planGoal(ev, params, api) {
   let removed = []
   let fresh = null
   if (checked) {
+    api.remaining?.(finishWork(), { measured: true }) // counted, not guessed: no calibration
     await tuneConsumables("达标后", async () => {
       const st = stat(await run(config(), goal, long))
       if (ok(st)) cur = st
       return ok(st)
-    })
+    }, finishWork() - consWork)
     // shorten the time: drop gear that is not needed and lower levels as far as the goal allows,
     // the item that sets the finishing time first
     const gearDays = s => (slots[s].guild ? 0 : Math.max(0, pay[s][0][held[s]].cost) / perDay(slots[s].member))
@@ -392,8 +427,11 @@ export async function planGoal(ev, params, api) {
       return ok(st)
     }
     const before = { held: [...held], lv: lv.map(x => ({ ...x })) }
-    for (const u of undo) {
+    // long runs per item: one for gear, a binary search for levels; then one long and two fresh checks
+    const tests = u => (u.kind === "gear" ? 1 : Math.ceil(Math.log2(lv[u.k][u.s] - lv0[u.k][u.s] + 1)))
+    for (const [x, u] of undo.entries()) {
       if (api.signal.aborted) throw new Error("cancelled")
+      api.remaining?.(undo.slice(x).reduce((a, v) => a + tests(v), 1) * cost(long) + 2 * cost(verify), { measured: true })
       if (u.kind === "gear") {
         const keep = held[u.s]
         held[u.s] = 0
@@ -411,7 +449,7 @@ export async function planGoal(ev, params, api) {
         }
         lv[u.k][u.s] = hi
       }
-      api.progress(undo.indexOf(u) + 1, undo.length, "精简")
+      api.progress(x + 1, undo.length, "精简")
     }
     cur = stat(await run(config(), goal, long))
     // Every step above (and the greedy search) was decided on the same 12 runs, so what is left

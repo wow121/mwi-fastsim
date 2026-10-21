@@ -2,7 +2,7 @@
 // class pool (learned abilities plus any the user added with a level), finisher locked last, cast order by class, trigger
 // presets per ability; thresholds of "search" presets tuned afterwards (coarse, then fine).
 // Coordinate descent over members; successive halving per member.
-import { confirmAdaptive, halving, DEFAULT_STAGES } from "./search.mjs"
+import { confirmAdaptive, confirmWork, halving, halvingWork, nestedApi, DEFAULT_STAGES } from "./search.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
 import { optimizeConsumables } from "./opt-consumables.mjs"
@@ -96,6 +96,44 @@ function gridFor(s, scale) {
   return hpValues(scale, s.dep).coarse
 }
 
+/** The member's class pool and candidate configurations (the current one first); `cands` is null when the class is
+ *  unknown. */
+function memberCands(m, members, idx, params) {
+  const cfg = members[idx]
+  const mp = memberPool(m, cfg, { crossElement: !!params.crossElement })
+  if (!mp.cls) return { mp, cands: null }
+  const excluded = new Set(params.exclude?.[idx] || [])
+  const added = Object.fromEntries(Object.entries(params.add?.[idx] || {}).filter(([h, l]) => mp.pool.some(p => p.hrid === h) && Number(l) > 0).map(([h, l]) => [h, Math.floor(Number(l))]))
+  const pool = mp.pool.filter(p => (p.learned || added[p.hrid]) && !excluded.has(p.hrid)).map(p => p.hrid)
+  const levels = { ...Object.fromEntries(mp.pool.map(p => [p.hrid, p.level])), ...added }
+  const cands = [{ key: "当前", members: clone(members), incumbent: true, search: [] }]
+  const seen = new Set([configKey(m, cfg)])
+  for (const g of groups(pool, mp.slots, mp.cls))
+    for (const v of presetVariants(m, g, !params.allPresets)) {
+      const a = applyGroup(members, idx, g, v, levels, m)
+      // skip variants that are the current configuration (or another candidate) in other words
+      const k = configKey(m, a.members[idx])
+      if (seen.has(k)) continue
+      seen.add(k)
+      cands.push({ key: `${g.join("|")}#${JSON.stringify(a.presets)}`, members: a.members, search: a.search, presets: a.presets })
+    }
+  return { mp, pool, cands }
+}
+
+// ------------------------------------------------------------------------- work estimates (sim-hours)
+
+const FINAL = 24 * 32 // baseline / final evaluate
+const PICK_ITEMS = 2 // thresholds to tune on the best preset group, before it is known
+const CONSUMABLES_PER_MEMBER = 10000 // rough: ~5 slots x (item + trigger halvings) in optimizeConsumables
+const tuneStages = stages => (stages.length > 1 ? stages.slice(1) : stages)
+/** tune over n items: coarse + fine halving of ~5 values each. */
+const tuneWork = (n, stages) => n * 2 * halvingWork(5, tuneStages(stages))
+/** improveCurrent from the member's current configuration: ~2 steps over its neighbours, then its thresholds tuned. */
+function improveWork(m, members, idx, scale, stages) {
+  const mat = materialize(m, members, idx)
+  return 2 * halvingWork(neighbors(m, mat, idx, scale).length + 1, stages) + tuneWork(currentItems(m, mat[idx], scale).length, stages)
+}
+
 const names = (m, cfg) => (cfg.abilities || []).map(a => (a?.abilityHrid ? zh(m.$e, a.abilityHrid) : "—"))
 
 /**
@@ -119,35 +157,36 @@ export async function optimizeSkills(ev, params, api) {
   const common = { target, extra, objective, signal: api.signal }
   // 24 h x 32 runs, paired: with 8 runs the noise (deaths come in chains) often hid real gains
   const finalSeeds = seedList(99173, 32)
+  // remaining work: the current member's rest `cur` + the members after position i this round + later rounds + tail
+  const report = x => api.remaining?.(x)
+  const est = {} // member index -> { full: one pass over the member, improve: its improveCurrent }
+  const estimate = idx => {
+    const { cands } = memberCands(m, members, idx, params)
+    const improve = cands ? improveWork(m, members, idx, scale, stages) : 0
+    est[idx] = { improve, full: cands ? halvingWork(cands.length, stages) + tuneWork(PICK_ITEMS, stages) + improve + confirmWork(stages, 2) : 0 }
+  }
+  optimize.forEach(estimate)
+  const sumFull = list => list.reduce((s, idx) => s + est[idx].full, 0)
+  const afterCross = () => (params.consumables ? 2 * FINAL + CONSUMABLES_PER_MEMBER * optimize.length : 0) + FINAL
+  const tail = () => (optimize.length >= 2 ? halvingWork(3 ** optimize.length, stages) + confirmWork(stages, 1) : 0) + afterCross()
+  const left = (round, i, cur) => cur + sumFull(optimize.slice(i + 1)) + (rounds - round) * sumFull(optimize) + tail()
+  report(FINAL + left(1, -1, 0))
   const baseline = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   api.log(`基准：${fmt(baseline.value, objective)}`)
 
   for (let round = 1; round <= rounds; round++) {
     let changed = false
-    for (const idx of optimize) {
+    for (const [i, idx] of optimize.entries()) {
       const cfg = members[idx]
       const who = cfg.name || `队员${idx + 1}`
-      const mp = memberPool(m, cfg, { crossElement: !!params.crossElement })
-      if (!mp.cls) {
+      const { mp, pool, cands } = memberCands(m, members, idx, params)
+      if (!cands) {
         api.log(`${who}：没识别出职业（武器 ${zh(m.$e, cfg.equipment?.weapon?.itemHrid) || "空"}），跳过`)
+        report(left(round, i, 0))
         continue
       }
-      const excluded = new Set(params.exclude?.[idx] || [])
-      const added = Object.fromEntries(Object.entries(params.add?.[idx] || {}).filter(([h, l]) => mp.pool.some(p => p.hrid === h) && Number(l) > 0).map(([h, l]) => [h, Math.floor(Number(l))]))
-      const pool = mp.pool.filter(p => (p.learned || added[p.hrid]) && !excluded.has(p.hrid)).map(p => p.hrid)
-      const levels = { ...Object.fromEntries(mp.pool.map(p => [p.hrid, p.level])), ...added }
-      const gs = groups(pool, mp.slots, mp.cls)
-      const cands = [{ key: "当前", members: clone(members), incumbent: true, search: [] }]
-      const seen = new Set([configKey(m, members[idx])])
-      for (const g of gs)
-        for (const v of presetVariants(m, g, !params.allPresets)) {
-          const a = applyGroup(members, idx, g, v, levels, m)
-          // skip variants that are the current configuration (or another candidate) in other words
-          const k = configKey(m, a.members[idx])
-          if (seen.has(k)) continue
-          seen.add(k)
-          cands.push({ key: `${g.join("|")}#${JSON.stringify(a.presets)}`, members: a.members, search: a.search, presets: a.presets })
-        }
+      const confirm2 = confirmWork(stages, 2)
+      report(left(round, i, halvingWork(cands.length, stages) + tuneWork(PICK_ITEMS, stages) + est[idx].improve + confirm2))
       api.log(`第 ${round} 轮 · ${who}（${mp.className}，${mp.slots} 个技能格，池 ${pool.length} 个）：${cands.length - 1} 个方案`)
       let ranked = await halving(ev, cands, {
         ...common,
@@ -160,6 +199,7 @@ export async function optimizeSkills(ev, params, api) {
       const cur = ranked.find(r => r.incumbent)
       const pick = ranked.filter(r => !r.incumbent).sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)[0]
       const tuneCtx = { ev, common, stages, idx, who, api, m, scale }
+      report(left(round, i, (pick ? tuneWork(pick.search?.length || 0, stages) : 0) + est[idx].improve + confirm2))
       const challengers = []
       // 1) the best preset group, with its "search" thresholds tuned
       if (pick) {
@@ -168,14 +208,16 @@ export async function optimizeSkills(ev, params, api) {
           const st = enemyHp ? hpValues(scale, x.dep).step : null
           return { hrid: x.hrid, index: x.index, coarse: gridFor(x, scale), percentage: x.kind === "percentage", fine: v => (x.kind === "percentage" ? [v - 5, v + 5] : st ? [v - 2 * st(v), v - st(v), v + st(v), v + 2 * st(v)] : [v * 0.75, v * 0.9, v * 1.1, v * 1.25]) }
         })
-        challengers.push({ ...(await tune(tuneCtx, { ...pick }, items)).best, key: "best", incumbent: false })
+        challengers.push({ ...(await tune(tuneCtx, { ...pick }, items, r => report(left(round, i, r + est[idx].improve + confirm2)))).best, key: "best", incumbent: false })
+        report(left(round, i, est[idx].improve + confirm2))
       }
       // 2) the current abilities and trigger conditions, improved step by step: add / remove one condition at a
       //    time, then tune every numeric threshold
       {
-        const t = await improveCurrent(tuneCtx, cur, round)
+        const t = await improveCurrent(tuneCtx, cur, round, r => report(left(round, i, r + confirm2)))
         if (t.changes.length) challengers.push({ ...t.best, key: "tuned", incumbent: false, tuned: t.changes, presets: groupLabels(t.changes) })
       }
+      report(left(round, i, challengers.length ? confirmWork(stages, challengers.length) : 0))
       // confirm against the current configuration on fresh seeds: the challengers were picked as the best of many
       // on the search seeds, so those numbers flatter them
       let best = cur
@@ -194,12 +236,15 @@ export async function optimizeSkills(ev, params, api) {
         api.log(`  → 采用 ${best.tuned ? `当前技能，触发改为 ${best.tuned.map(c => c.label).join("，")}` : names(m, members[idx]).join(" / ")}（+${fmt(best.vsIncumbent.mean, objective)}）`)
       } else api.log(best.confirmed ? `  → 当前配置已是最好（最有希望的 ${best.tuned ? `当前触发改进 ${best.tuned.map(c => c.label).join("，")}` : names(m, best.members[idx]).join(" / ")} 复核 ${best.vsIncumbent.mean >= 0 ? "+" : ""}${fmt(best.vsIncumbent.mean, objective)} ± ${fmt(1.96 * best.vsIncumbent.se, objective)}，不显著）` : "  → 当前配置已是最好")
       api.partial({ members, history, baseline: baseline.mean, objective })
+      estimate(idx) // from its new configuration, for the next round
+      report(left(round, i, 0))
     }
     if (!changed) break
   }
 
   // team cross check: each member's top configurations (the current one plus up to 2 others) combined across the
   // team and simulated together, for changes that only pay off together (e.g. who casts the shared debuff)
+  report(tail())
   if (optimize.length >= 2) {
     const key = c => configKey(m, c)
     const lists = optimize.map(idx => {
@@ -213,6 +258,7 @@ export async function optimizeSkills(ev, params, api) {
         combo.forEach((o, j) => (mem[optimize[j]] = clone(o.cfg)))
         return { key: `x${k}`, members: mem, combo, incumbent: k === 0 }
       })
+      report(halvingWork(cands.length, stages) + confirmWork(stages, 1) + afterCross())
       api.log(`全队交叉组合：每人前 ${Math.max(...lists.map(l => l.length))} 名方案互相组合，共 ${cands.length} 种`)
       let ranked = await halving(ev, cands, { ...common, stages, seedBase: 6000, onStage: (s, d, t) => api.progress(d, t, `全队交叉组合 · 阶段 ${s + 1}/${stages.length}`) })
       const cur = ranked.find(r => r.incumbent)
@@ -233,17 +279,20 @@ export async function optimizeSkills(ev, params, api) {
     }
   }
 
+  report(afterCross())
+
   // food / drink triggers on top of the new skills (mana use and pacing changed with them)
   let consumableChanges = []
   if (params.consumables) {
     api.log("接着优化药水触发")
-    const cr = await optimizeConsumables(ev, { target, extra, objective, members, optimize }, { ...api, partial: () => {} })
+    const cr = await optimizeConsumables(ev, { target, extra, objective, members, optimize }, nestedApi(api, FINAL, { partial: () => {} }))
     if (!cr.unchanged) {
       members = cr.members
       consumableChanges = cr.changes
     }
   }
 
+  report(FINAL)
   const final = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   const cmp = paired(final.perSeed, baseline.perSeed)
   // every change was confirmed on its own; the team check is reported, not used to throw them away
@@ -283,7 +332,7 @@ function currentItems(m, cfg, scale) {
 
 /** Tunes thresholds one at a time (coarse values, then fine values around the best); a new value is kept when it
  *  beats the running best on the search seeds. Returns { best, changes: [{ hrid, index, from, to, label }] }. */
-async function tune({ ev, common, stages, idx, who, api, m }, start, items) {
+async function tune({ ev, common, stages, idx, who, api, m }, start, items, onLeft) {
   let best = start
   const at = (c, it) => c.members[idx].triggerMap[it.hrid][it.index]
   const clean = (it, v) => (it.percentage ? Math.min(100, Math.max(1, Math.round(v))) : Math.max(1, Math.round(v)))
@@ -300,9 +349,10 @@ async function tune({ ev, common, stages, idx, who, api, m }, start, items) {
     const r = await halving(ev, cs, { ...common, stages: stages.length > 1 ? stages.slice(1) : stages, seedBase: 7000 + idx })
     if (!r[0].incumbent && r[0].vsIncumbent.mean > 0) best = { ...r[0], incumbent: false }
   }
-  for (const it of items) {
+  for (const [k, it] of items.entries()) {
     await tryValues(it, it.coarse, "粗搜")
     await tryValues(it, it.fine(at(best, it).value), "细搜")
+    onLeft?.(tuneWork(items.length - k - 1, stages))
   }
   const changes = items.map(it => ({ hrid: it.hrid, index: it.index, from: at(start, it).value, to: at(best, it).value }))
     .filter(c => c.from !== c.to)
@@ -407,7 +457,7 @@ function pairNeighbors(members, idx, adds) {
 /** From the current configuration: up to 3 steps of the best change (all neighbours through the staged search,
  *  coarse to fine; when none is clearly better, pairs of the 10 best single additions; a step is taken when it is
  *  clearly better on the search seeds), then the numeric thresholds tuned. Returns { best, changes: [{ hrid, label }] }. */
-async function improveCurrent(ctx, cur, round) {
+async function improveCurrent(ctx, cur, round, onLeft) {
   const { ev, common, stages, idx, who, api, m } = ctx
   let state = { ...cur, members: materialize(m, cur.members, idx), incumbent: false, presets: {} }
   const changes = []
@@ -437,8 +487,12 @@ async function improveCurrent(ctx, cur, round) {
     api.log(`  ${who} 触发条件第 ${step} 步：${top.change.label}（搜索时 +${fmt(top.vsIncumbent.mean, common.objective)}）`)
     for (const c of top.change.pair || [top.change]) changes.push({ hrid: c.hrid, label: c.label })
     state = { ...top, incumbent: false }
+    // assume one more step (up to 3), then the thresholds
+    if (step < 3) onLeft?.(halvingWork(neighbors(m, state.members, idx, ctx.scale).length + 1, stages) + tuneWork(currentItems(m, state.members[idx], ctx.scale).length, stages))
   }
-  const t = await tune(ctx, state, currentItems(m, state.members[idx], ctx.scale))
+  const items = currentItems(m, state.members[idx], ctx.scale)
+  onLeft?.(tuneWork(items.length, stages))
+  const t = await tune(ctx, state, items, onLeft)
   return { best: t.best, changes: [...changes, ...t.changes] }
 }
 

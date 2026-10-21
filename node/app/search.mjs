@@ -21,6 +21,30 @@ export const DEFAULT_STAGES = [
   { hours: 12, seeds: 8, keep: 3 },
 ]
 
+/** Planned sim-hours of `halving` over n candidates (incumbent included), for progress estimates. */
+export function halvingWork(n, stages = DEFAULT_STAGES) {
+  let alive = n, work = 0
+  for (let s = 0; s < stages.length && alive > 0; s++) {
+    const st = stages[s]
+    work += alive * st.hours * st.seeds
+    const keep = typeof st.keep === "number" && st.keep < 1 ? Math.ceil(alive * st.keep) : st.keep
+    alive = Math.min(alive, Math.max(st.min || 1, keep) + 1)
+  }
+  return work
+}
+
+/** Expected sim-hours of `confirmAdaptive` with k challengers (usually one doubling past the first 4x). */
+export function confirmWork(stages, k) {
+  const last = stages.at(-1)
+  return (k + 1) * last.hours * 2 * last.seeds * 4 * 1.5
+}
+
+/** The api for an optimizer run inside another: its remaining work plus `after` (sim-hours the caller still
+ *  has to run once it returns). */
+export function nestedApi(api, after, extra = {}) {
+  return { ...api, ...extra, remaining: api.remaining ? (r, o) => api.remaining(r + after, o) : undefined }
+}
+
 /**
  * candidates: [{ key, label, members, incumbent? }]; the incumbent always survives. `onScored(stage, sorted)` sees
  * every stage's scores (e.g. the first stage's ranking of all candidates).
