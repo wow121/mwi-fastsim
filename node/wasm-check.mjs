@@ -27,7 +27,8 @@ wasm.loadGameData(gdText)
 
 const team = JSON.parse(fs.readFileSync(path.join(here, "data", "team.json"), "utf8"))
 const members = team.selected.map(id => team.members.find(p => String(p.id) === String(id))).filter(Boolean)
-const zones = Object.values(game.$e.actionDetailMap).filter(a => a.type === "/action_types/combat").map(a => a.hrid)
+// only zones the team may enter together (single-monster zones are solo)
+const zones = Object.values(game.$e.actionDetailMap).filter(a => a.type === "/action_types/combat" && !(a.maxPartySize < members.length)).map(a => a.hrid)
 const n = Number(process.argv[2] || 16)
 let ok = 0
 let msW = 0

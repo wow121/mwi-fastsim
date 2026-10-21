@@ -1,6 +1,6 @@
 <script setup>
 import { computed, watch } from "vue"
-import { rememberTarget, store } from "../api.js"
+import { rememberTarget, selectedMembers, store } from "../api.js"
 
 // v-model: { kind: "zone", zoneHrid, difficultyTier } | { kind: "labyrinth", labyrinthHrid, roomLevel }
 const t = defineModel({ required: true })
@@ -11,7 +11,10 @@ const zoneList = computed(() => [
   { label: "区域", options: o.value.zones },
   { label: "地下城", options: o.value.dungeons },
 ])
-const maxTier = computed(() => [...o.value.zones, ...o.value.dungeons].find(z => z.hrid === t.value.zoneHrid)?.maxDifficulty ?? 0)
+const zone = computed(() => [...o.value.zones, ...o.value.dungeons].find(z => z.hrid === t.value.zoneHrid))
+const maxTier = computed(() => zone.value?.maxDifficulty ?? 0)
+// the game lets at most maxPartySize players in (3 in group zones, 5 in dungeons)
+const tooBig = computed(() => (zone.value?.maxPartySize && selectedMembers().length > zone.value.maxPartySize ? zone.value.maxPartySize : 0))
 function setKind(k) {
   t.value = k === "labyrinth"
     ? { kind: "labyrinth", labyrinthHrid: o.value.labyrinths[0]?.hrid, roomLevel: 100 }
@@ -33,6 +36,7 @@ function setKind(k) {
       </el-select>
       <span class="muted">难度</span>
       <el-input-number v-model="t.difficultyTier" :min="0" :max="maxTier" size="small" style="width: 90px" />
+      <span v-if="tooBig" style="color: var(--el-color-danger)">最多 {{ tooBig }} 人，出战成员有 {{ selectedMembers().length }} 人</span>
     </template>
     <template v-else>
       <el-select v-model="t.labyrinthHrid" filterable style="width: 220px" size="small">

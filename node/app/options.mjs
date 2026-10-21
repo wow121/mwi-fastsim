@@ -21,7 +21,7 @@ export function options(m, book) {
     .map(i => ({ hrid: i.hrid, name: n(i.hrid), sortIndex: i.sortIndex, hp: i.consumableDetail.hitpointRestore || 0, mp: i.consumableDetail.manapointRestore || 0 }))
     .sort(bySort)
   const actions = Object.values(maps.actionDetailMap).filter(a => a.type === "/action_types/combat" && a.combatZoneInfo)
-  const zone = a => ({ hrid: a.hrid, name: n(a.hrid), maxDifficulty: a.maxDifficulty ?? 0, sortIndex: a.sortIndex, isDungeon: !!a.combatZoneInfo.isDungeon })
+  const zone = a => ({ hrid: a.hrid, name: n(a.hrid), maxDifficulty: a.maxDifficulty ?? 0, maxPartySize: a.maxPartySize || null, sortIndex: a.sortIndex, isDungeon: !!a.combatZoneInfo.isDungeon })
   return {
     equipment,
     food: consumables("/item_categories/food"),

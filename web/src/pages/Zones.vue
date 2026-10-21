@@ -23,10 +23,13 @@ function params() {
   if (!members.length) return ElMessage.warning("先在“队伍”页勾选出战成员")
   const all = [...o.value.zones, ...o.value.dungeons]
   const targets = []
+  const tooBig = []
   for (const h of [...zones.value, ...dungeons.value]) {
     const z = all.find(x => x.hrid === h)
+    if (z?.maxPartySize && members.length > z.maxPartySize) { tooBig.push(z.name); continue }
     for (const t of tiers.value) if (t <= (z?.maxDifficulty ?? 0)) targets.push({ kind: "zone", zoneHrid: h, difficultyTier: t })
   }
+  if (tooBig.length) ElMessage.warning(`队伍 ${members.length} 人，跳过人数上限更小的：${tooBig.join("、")}`)
   if (!targets.length) return ElMessage.warning("没有可模拟的目标")
   return { members, targets, hours: hours.value, seeds: seeds.value, seedBase: reseed.value ? randomSeedBase() : undefined, extra: extra.value, objective: objective.value }
 }

@@ -31,13 +31,26 @@ function common(c) {
     consumableCombatTriggersMap: trig(k => k.startsWith("/items/")),
     abilityCombatTriggersMap: trig(k => k.startsWith("/abilities/")),
     characterHouseRoomMap: Object.fromEntries(Object.entries(c.houseRooms).map(([h, l]) => [h, { houseRoomHrid: h, level: l }])),
-    characterAchievements: [],
+    characterAchievements: Object.keys(c.achievements || {}).filter(h => c.achievements[h]).map(h => ({ achievementHrid: h, isCompleted: true })),
+    ...guild(c),
   }
+}
+// guild buff levels + the shrine levels that cap them (the config's caps if it has them, else just enough)
+function guild(c) {
+  const buffs = Object.entries(c.guildBuffs || {})
+  const shrines = {}
+  for (const [h, l] of buffs) {
+    const s = m.$e.guildBuffDetailMap[h].shrineHrid
+    shrines[s] = Math.max(shrines[s] || 0, c.guildBuffCaps?.[h] ?? l)
+  }
+  return { characterGuildBuffMap: Object.fromEntries(buffs.map(([h, l]) => [h, { guildBuffHrid: h, level: l }])), guildBuildingLevelMap: shrines }
 }
 function current(c) {
   return {
     type: "init_character_data",
     character: { id: 1, name: c.name },
+    // labyrinth upgrades only come with the logged-in character
+    characterInfo: Object.fromEntries(Object.entries(c.labyrinthUpgrades || {}).map(([k, v]) => [`labyrinth${k[0].toUpperCase()}${k.slice(1)}Level`, v])),
     ...common(c),
     characterItems: Object.entries(c.equipment).filter(([, e]) => e.itemHrid).map(([s, e]) => ({ itemLocationHrid: loc(s, e.itemHrid), itemHrid: e.itemHrid, enhancementLevel: e.enhancementLevel, count: 1 })),
     combatUnit: { combatAbilities: c.abilities.map((a, i) => (a.abilityHrid ? { abilityHrid: a.abilityHrid, level: a.level, slotNumber: i } : null)).filter(Boolean) },
@@ -54,6 +67,8 @@ function shared(c) {
     foodItemHrids: c.food, drinkItemHrids: c.drinks,
     consumableCombatTriggersMap: all.consumableCombatTriggersMap, abilityCombatTriggersMap: all.abilityCombatTriggersMap,
     characterHouseRoomMap: all.characterHouseRoomMap,
+    characterAchievements: all.characterAchievements,
+    characterGuildBuffMap: all.characterGuildBuffMap, guildBuildingLevelMap: all.guildBuildingLevelMap,
   }
 }
 const envelope = {
