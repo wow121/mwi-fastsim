@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.6
+// @version      0.4.7
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -81,6 +81,7 @@
     let lastRaw = null
     let partyNames = []
     let done = false
+    let lastLab = ""
 
     function profileName(p) {
       const s = p && p.profile ? p.profile : p || {}
@@ -220,51 +221,9 @@
       }
       return null
     }
-    // The game page's React state: the labyrinth settings (loadout and level setting per room
-    // type), the loadouts and the crates are only there (same lookup as the labyrinth calculator).
-    function reactGameState() {
-      const ok = s => !!(s && typeof s === "object" && ("characterLabyrinth" in s || "combatUnit" in s || "gameConn" in s))
-      try {
-        const page = document.querySelector('[class^="GamePage"]')
-        const key = page && Object.keys(page).find(k => k.startsWith("__reactFiber$"))
-        const direct = key && page[key]?.return?.stateNode?.state
-        if (ok(direct)) return direct
-        const root = document.getElementById("root")
-        const queue = [root && root._reactRootContainer && root._reactRootContainer.current]
-        const seen = new Set()
-        for (let steps = 0; queue.length && steps < 20000; steps++) {
-          const f = queue.shift()
-          if (!f || typeof f !== "object" || seen.has(f)) continue
-          seen.add(f)
-          if (ok(f.stateNode && f.stateNode.state)) return f.stateNode.state
-          if (f.child) queue.push(f.child)
-          if (f.sibling) queue.push(f.sibling)
-        }
-      } catch {}
-      return null
-    }
-    const entriesOf = c => (c instanceof Map ? Array.from(c.entries()) : c && typeof c === "object" ? Object.entries(c) : [])
-    const plain = v => (v == null ? v : JSON.parse(JSON.stringify(v, (k, x) => (x instanceof Map ? Object.fromEntries(x) : x))))
-    function labyrinthSnapshot() {
-      const s = reactGameState() || gameState()
-      if (!s) return null
-      const setting = {}
-      for (const [k, v] of entriesOf(s.characterSetting)) if (k.startsWith("labyrinth")) setting[k] = v
-      const loadouts = []
-      for (const [k, l] of entriesOf(s.characterLoadoutDict))
-        if (l && l.actionTypeHrid === "/action_types/combat")
-          loadouts.push({ id: Number(l.id ?? k), name: String(l.name || ""), useExactEnhancement: !!l.useExactEnhancement, wearableMap: plain(l.wearableMap) || {}, abilityMap: plain(l.abilityMap) || {}, abilityCombatTriggersMap: plain(l.abilityCombatTriggersMap) ?? null })
-      const combat = entriesOf(s.characterSkillMap).find(([k]) => k === "/skills/combat")
-      const lab = s.characterLabyrinth || {}
-      return {
-        // same order as the labyrinth calculator
-        combatLevel: Number(combat && combat[1] && combat[1].level) || Number(s.combatUnit && s.combatUnit.combatDetails && s.combatUnit.combatDetails.combatLevel) ||
-          Number(s.combatUnit && s.combatUnit.combatLevel) || Number(s.character && s.character.combatLevel) || null,
-        setting,
-        loadouts,
-        crates: { tea: String(lab.teaCrateItemHrid || ""), coffee: String(lab.coffeeCrateItemHrid || ""), food: String(lab.foodCrateItemHrid || "") },
-      }
-    }
+    // The labyrinth settings live in the game page's React state; read in the page world
+    // (see labyrinthReader).
+    const labyrinthSnapshot = pageLabyrinthReader()
     function resolvePartyNames(info, state) {
       if (!info || typeof info !== "object") return []
       const slotSource = info.partySlotMap || info.partySlotsMap || info.partyMemberMap || info.partySlots
@@ -301,6 +260,7 @@
       const current = compactProfile(lastRaw, true)
       try {
         const lab = labyrinthSnapshot()
+        lastLab = JSON.stringify(lab)
         if (lab) current.labyrinthState = lab
       } catch (e) {
         console.error("[fastsim] labyrinth", e)
@@ -399,14 +359,13 @@
     }
     hookSocket(["init_character_data", "profile_shared"], data => onMessage({ data }))
     // the labyrinth settings live in the page state: send again when they change
-    let lastLab = ""
     setInterval(() => {
       if (!lastRaw) return
       let t = ""
       try { t = JSON.stringify(labyrinthSnapshot()) } catch {}
       if (t && t !== lastLab) {
-        if (lastLab) scheduleSend()
         lastLab = t
+        scheduleSend()
       }
     }, 30000)
     setTimeout(() => {
@@ -562,6 +521,95 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addButtons)
     else addButtons()
     probe().then(up => console.info(`[fastsim] 本地加速${up ? "已连接" : "未启动，使用网站原版模拟"}`))
+  }
+
+  // =====================================================================================
+  // Labyrinth snapshot from the game page's React state: the labyrinth settings (loadout and
+  // level setting per room type), the loadouts and the crates are only there (same lookup as
+  // the labyrinth calculator). The React fiber is an expando on the DOM elements, which an
+  // isolated world (Tampermonkey MV3) cannot see, so the reader runs in the page world and
+  // answers a request event synchronously with a JSON string. If the page refuses inline
+  // scripts it runs here instead.
+  // =====================================================================================
+  function pageLabyrinthReader() {
+    const REQ = `fastsim-lab-${Math.random().toString(36).slice(2)}`
+    const RES = REQ + "-res"
+    let got
+    document.addEventListener(RES, e => { got = e.detail })
+    const s = document.createElement("script")
+    s.textContent = `(${pageLabyrinthServe.toString()})(${JSON.stringify(REQ)}, ${JSON.stringify(RES)}, ${labyrinthReader.toString()})`
+    ;(document.head || document.documentElement).appendChild(s)
+    s.remove()
+    if (document.documentElement.getAttribute("data-" + REQ) !== "1") return labyrinthReader(W, document)
+    return () => {
+      got = undefined
+      document.dispatchEvent(new CustomEvent(REQ))
+      return typeof got === "string" && got ? JSON.parse(got) : null
+    }
+  }
+
+  function pageLabyrinthServe(REQ, RES, reader) {
+    const snapshot = reader(window, document)
+    document.addEventListener(REQ, () => {
+      let out = ""
+      try { out = JSON.stringify(snapshot()) } catch (e) { console.error("[fastsim] labyrinth", e) }
+      document.dispatchEvent(new CustomEvent(RES, { detail: out }))
+    })
+    document.documentElement.setAttribute("data-" + REQ, "1")
+  }
+
+  // self-contained: its source is injected into the page
+  function labyrinthReader(win, doc) {
+    function gameState() {
+      for (const c of [win.mwi, win.MWI, win.Mwi]) {
+        const s = c && c.game && c.game.state
+        if (s && typeof s === "object") return s
+      }
+      return null
+    }
+    function reactGameState() {
+      const ok = s => !!(s && typeof s === "object" && ("characterLabyrinth" in s || "combatUnit" in s || "gameConn" in s))
+      try {
+        const page = doc.querySelector('[class^="GamePage"]')
+        const key = page && Object.keys(page).find(k => k.startsWith("__reactFiber$"))
+        const direct = key && page[key]?.return?.stateNode?.state
+        if (ok(direct)) return direct
+        const root = doc.getElementById("root")
+        const queue = [root && root._reactRootContainer && root._reactRootContainer.current]
+        const seen = new Set()
+        for (let steps = 0; queue.length && steps < 20000; steps++) {
+          const f = queue.shift()
+          if (!f || typeof f !== "object" || seen.has(f)) continue
+          seen.add(f)
+          if (ok(f.stateNode && f.stateNode.state)) return f.stateNode.state
+          if (f.child) queue.push(f.child)
+          if (f.sibling) queue.push(f.sibling)
+        }
+      } catch {}
+      return null
+    }
+    const entriesOf = c => (c instanceof Map ? Array.from(c.entries()) : c && typeof c === "object" ? Object.entries(c) : [])
+    const plain = v => (v == null ? v : JSON.parse(JSON.stringify(v, (k, x) => (x instanceof Map ? Object.fromEntries(x) : x))))
+    return function labyrinthSnapshot() {
+      const s = reactGameState() || gameState()
+      if (!s) return null
+      const setting = {}
+      for (const [k, v] of entriesOf(s.characterSetting)) if (k.startsWith("labyrinth")) setting[k] = v
+      const loadouts = []
+      for (const [k, l] of entriesOf(s.characterLoadoutDict))
+        if (l && l.actionTypeHrid === "/action_types/combat")
+          loadouts.push({ id: Number(l.id ?? k), name: String(l.name || ""), useExactEnhancement: !!l.useExactEnhancement, wearableMap: plain(l.wearableMap) || {}, abilityMap: plain(l.abilityMap) || {}, abilityCombatTriggersMap: plain(l.abilityCombatTriggersMap) ?? null })
+      const combat = entriesOf(s.characterSkillMap).find(([k]) => k === "/skills/combat")
+      const lab = s.characterLabyrinth || {}
+      return {
+        // same order as the labyrinth calculator
+        combatLevel: Number(combat && combat[1] && combat[1].level) || Number(s.combatUnit && s.combatUnit.combatDetails && s.combatUnit.combatDetails.combatLevel) ||
+          Number(s.combatUnit && s.combatUnit.combatLevel) || Number(s.character && s.character.combatLevel) || null,
+        setting,
+        loadouts,
+        crates: { tea: String(lab.teaCrateItemHrid || ""), coffee: String(lab.coffeeCrateItemHrid || ""), food: String(lab.foodCrateItemHrid || "") },
+      }
+    }
   }
 
   // =====================================================================================
