@@ -19,6 +19,7 @@ import { Jobs } from "./app/jobs.mjs"
 import { teamDTO } from "./app/model.mjs"
 import { options } from "./app/options.mjs"
 import { decodeGameData } from "./app/gamedata.mjs"
+import { setLang, t } from "./app/lang.mjs"
 import { EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes, jobRoutes, selectedMembers, simulate, skillPools, teamFromGame, teamFromSite } from "./app/routes-core.mjs"
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith("--") ? [...acc, [a.slice(2), all[i + 1]]] : acc), []))
@@ -155,9 +156,9 @@ function loadTeam() {
  */
 function checkDTO(st, team) {
   const site = readJson(path.join(DATA, "last-site-payload.json"), null)
-  if (!site?.players?.length) return { summary: "尚无网站模拟记录（在网站上跑一次模拟后再同步即可核对）", ok: null }
+  if (!site?.players?.length) return { summary: t("尚无网站模拟记录（在网站上跑一次模拟后再同步即可核对）"), ok: null }
   const members = selectedMembers(team)
-  if (members.length !== site.players.length) return { summary: `网站最近一次模拟是 ${site.players.length} 人，当前选择 ${members.length} 人，未核对`, ok: null }
+  if (members.length !== site.players.length) return { summary: t("网站最近一次模拟是 {a} 人，当前选择 {b} 人，未核对", { a: site.players.length, b: members.length }), ok: null }
   const ours = teamDTO(st.m, members)
   const sort = v => (Array.isArray(v) ? v.map(sort) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sort(v[k])])) : v)
   const diffs = []
@@ -165,14 +166,15 @@ function checkDTO(st, team) {
     if (JSON.stringify(sort(a)) === JSON.stringify(sort(b))) return
     if (a && b && typeof a === "object" && typeof b === "object") {
       for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) walk(a[k], b[k], `${p}.${k}`)
-    } else diffs.push(`${p}: 本地=${JSON.stringify(a)} 网站=${JSON.stringify(b)}`)
+    } else diffs.push(t("{p}: 本地={a} 网站={b}", { p, a: JSON.stringify(a), b: JSON.stringify(b) }))
   }
-  ours.forEach((o, i) => walk(o, site.players[i], `队员${i + 1}`))
-  return { ok: diffs.length === 0, summary: diffs.length ? `${diffs.length} 处不一致` : "与网站生成的数据完全一致", diffs: diffs.slice(0, 50) }
+  ours.forEach((o, i) => walk(o, site.players[i], t("队员{n}", { n: i + 1 })))
+  return { ok: diffs.length === 0, summary: diffs.length ? t("{n} 处不一致", { n: diffs.length }) : t("与网站生成的数据完全一致"), diffs: diffs.slice(0, 50) }
 }
 
 async function api(req, url, body) {
   const p = url.pathname
+  if (p === "/api/lang" && req.method === "PUT") return { lang: setLang(body.lang) }
   if (p === "/api/state" && req.method === "GET") {
     return {
       team: loadTeam(),
@@ -244,7 +246,7 @@ function serveStatic(url, res) {
   if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) f = path.join(WEB, "index.html")
   if (!fs.existsSync(f)) {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" })
-    return res.end("web/dist 不存在：请先在 web 目录执行 npm run build")
+    return res.end("web/dist missing: run `npm run build` in web/ first")
   }
   res.writeHead(200, { "content-type": MIME[path.extname(f)] || "application/octet-stream" })
   fs.createReadStream(f).pipe(res)

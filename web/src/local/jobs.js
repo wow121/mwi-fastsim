@@ -1,6 +1,7 @@
 // Background jobs in the browser (same interface as node/app/jobs.mjs); finished jobs are kept in
 // IndexedDB so results survive a reload. A reload interrupts running jobs.
 import { calibration, paramsKey, trackProgress } from "@app/job-progress.mjs"
+import { t } from "@app/lang.mjs"
 import { kvDel, kvGet, kvKeys, kvSet } from "./kv.js"
 
 export class Jobs {
@@ -58,7 +59,7 @@ export class Jobs {
     const controller = new AbortController()
     const key = paramsKey(type, params)
     const prior = this.prior(key)
-    const j = { id, type, title, params, key, status: "running", createdAt: Date.now(), progress: { done: 0, total: 0, stage: "准备中" }, log: [], result: null, controller }
+    const j = { id, type, title, params, key, status: "running", createdAt: Date.now(), progress: { done: 0, total: 0, stage: t("准备中") }, log: [], result: null, controller }
     this.jobs.set(id, j)
     const api = {
       signal: controller.signal,

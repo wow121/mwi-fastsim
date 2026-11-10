@@ -3,8 +3,9 @@ import { computed, ref, watch } from "vue"
 import { ElMessage } from "element-plus"
 import { clone, money, pct, store, triggerText } from "../api.js"
 import JobRunner from "../components/JobRunner.vue"
+import { joinList, t, tk } from "../i18n.js"
 
-const UPGRADES = [["attackSpeed", "攻击速度"], ["castSpeed", "施法速度"], ["combatDamage", "战斗伤害"], ["criticalRate", "暴击率"]]
+const UPGRADES = [["attackSpeed", tk("攻击速度")], ["castSpeed", tk("施法速度")], ["combatDamage", tk("战斗伤害")], ["criticalRate", tk("暴击率")]]
 
 const members = computed(() => store.team.members || [])
 // the logged-in character is the one with the labyrinth settings / inventory
@@ -30,17 +31,17 @@ const result = ref(null)
 const open = ref([])
 
 function params() {
-  if (!member.value) return ElMessage.warning("队伍里还没有角色，先在游戏里用油猴脚本同步")
+  if (!member.value) return ElMessage.warning(t("队伍里还没有角色，先在游戏里用油猴脚本同步"))
   const m = clone(member.value)
   m.labyrinthUpgrades = { ...(m.labyrinthUpgrades || {}), ...upgrades.value }
   return { member: m, combatLevel: combatLevel.value, monsters: monsters.value, crates: customCrates.value ? crates.value : undefined, threshold: threshold.value / 100, buy: buy.value, maxSpend: maxSpend.value * 1e6 }
 }
 
 const floorOf = level => Math.floor(level / 20)
-const signed = n => (n == null ? "未设" : n > 0 ? `+${n}` : String(n))
-const sec = v => (v == null ? "—" : `${v.toFixed(1)} 秒`)
-const crateNames = hs => (hs || []).map(h => store.options?.labyrinthCrates?.find(c => c.hrid === h)?.name || h.split("/").pop()).join("、") || "无"
-const sourceText = { room: "", fallback: "（这个怪没设配装，用的第一个战斗配装）", missing: "（没有战斗配装）", none: "（没读到迷宫设置，用的当前装备）" }
+const signed = n => (n == null ? t("未设") : n > 0 ? `+${n}` : String(n))
+const sec = v => (v == null ? "—" : t("{n} 秒", { n: v.toFixed(1) }))
+const crateNames = hs => joinList((hs || []).map(h => store.options?.labyrinthCrates?.find(c => c.hrid === h)?.name || h.split("/").pop())) || t("无")
+const sourceText = { room: "", fallback: tk("（这个怪没设配装，用的第一个战斗配装）"), missing: tk("（没有战斗配装）"), none: tk("（没读到迷宫设置，用的当前装备）") }
 const rows = computed(() => (result.value?.results || []).map(r => ({ ...r, bestBuy: r.purchases?.[0] })))
 const changed = (r, e) => {
   const c = r.current.equipment.find(x => x.slot === e.slot)
@@ -51,80 +52,80 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
 
 <template>
   <div class="page">
-    <h2>迷宫配置推荐</h2>
+    <h2>{{ t("迷宫配置推荐") }}</h2>
     <el-card>
       <p class="muted" style="margin-top: 0">
-        和迷宫胜率计算器的算法一样：每个迷宫怪用游戏里给它设的配装（装备按“最高强化 / 精确强化”的设置取），不带食物饮料，补给箱、迷宫升级生效；
-        游戏自动挑战时房间等级 = 有效等级（战斗等级 + 补给箱等级加成）+ 设置 − 1，结果按这个“设置”给出（+N / −N）。
-        推荐设置 = 通关率（120 秒内打死，按整数百分比）不低于阈值的最高设置。再从背包里逐格换装备；技能先按武器职业试所有组合，再用学过的全部技能（含特殊技能）逐格替换；最后列出单买一件装备或技能书升 5 / 10 / 20 级的提升和花费。
-        需要油猴脚本 0.4.6 以上，在游戏页面打开过一次后自动同步。
+        {{ t("和迷宫胜率计算器的算法一样：每个迷宫怪用游戏里给它设的配装（装备按“最高强化 / 精确强化”的设置取），不带食物饮料，补给箱、迷宫升级生效；") }}
+        {{ t("游戏自动挑战时房间等级 = 有效等级（战斗等级 + 补给箱等级加成）+ 设置 − 1，结果按这个“设置”给出（+N / −N）。") }}
+        {{ t("推荐设置 = 通关率（120 秒内打死，按整数百分比）不低于阈值的最高设置。再从背包里逐格换装备；技能先按武器职业试所有组合，再用学过的全部技能（含特殊技能）逐格替换；最后列出单买一件装备或技能书升 5 / 10 / 20 级的提升和花费。") }}
+        {{ t("需要油猴脚本 0.4.6 以上，在游戏页面打开过一次后自动同步。") }}
       </p>
       <div class="row" style="margin-bottom: 8px">
-        <span class="muted">角色</span>
+        <span class="muted">{{ t("角色") }}</span>
         <el-select v-model="memberId" size="small" style="width: 200px">
-          <el-option v-for="m in members" :key="m.id" :label="m.name + (m.labyrinth ? '（已读迷宫设置）' : '')" :value="String(m.id)" />
+          <el-option v-for="m in members" :key="m.id" :label="m.name + (m.labyrinth ? t('（已读迷宫设置）') : '')" :value="String(m.id)" />
         </el-select>
-        <span class="muted">通关率阈值</span>
+        <span class="muted">{{ t("通关率阈值") }}</span>
         <el-input-number v-model="threshold" :min="50" :max="99" size="small" style="width: 100px" /><span class="muted">%</span>
-        <span class="muted">战斗等级</span>
+        <span class="muted">{{ t("战斗等级") }}</span>
         <el-input-number v-model="combatLevel" :min="1" :max="300" size="small" style="width: 100px" />
-        <span v-if="member?.labyrinth" class="muted">游戏里选的补给箱：{{ crateNames(member.labyrinth.crates) }}</span>
-        <span v-else class="bad">没读到迷宫设置：更新油猴脚本到 0.4.6，打开游戏页面重新同步</span>
+        <span v-if="member?.labyrinth" class="muted">{{ t("游戏里选的补给箱：") }}{{ crateNames(member.labyrinth.crates) }}</span>
+        <span v-else class="bad">{{ t("没读到迷宫设置：更新油猴脚本到 0.4.6，打开游戏页面重新同步") }}</span>
       </div>
       <div class="row" style="margin-bottom: 8px">
-        <span class="muted">迷宫升级</span>
+        <span class="muted">{{ t("迷宫升级") }}</span>
         <template v-for="[k, label] in UPGRADES" :key="k">
-          <span>{{ label }}</span><el-input-number v-model="upgrades[k]" :min="0" :max="12" size="small" style="width: 90px" />
+          <span>{{ t(label) }}</span><el-input-number v-model="upgrades[k]" :min="0" :max="12" size="small" style="width: 90px" />
         </template>
-        <span v-if="!member?.labyrinthUpgrades" class="muted">（没读到，手填）</span>
+        <span v-if="!member?.labyrinthUpgrades" class="muted">{{ t("（没读到，手填）") }}</span>
       </div>
       <div class="row" style="margin-bottom: 8px">
-        <span class="muted">迷宫怪</span>
-        <el-select v-model="monsters" multiple collapse-tags clearable placeholder="全部" size="small" style="width: 260px">
+        <span class="muted">{{ t("迷宫怪") }}</span>
+        <el-select v-model="monsters" multiple collapse-tags clearable :placeholder="t('全部')" size="small" style="width: 260px">
           <el-option v-for="z in store.options?.labyrinths || []" :key="z.hrid" :label="z.name" :value="z.hrid" />
         </el-select>
-        <el-checkbox v-model="customCrates">换别的补给箱</el-checkbox>
-        <el-select v-if="customCrates" v-model="crates" multiple collapse-tags clearable placeholder="不用" size="small" style="width: 260px">
+        <el-checkbox v-model="customCrates">{{ t("换别的补给箱") }}</el-checkbox>
+        <el-select v-if="customCrates" v-model="crates" multiple collapse-tags clearable :placeholder="t('不用')" size="small" style="width: 260px">
           <el-option v-for="c in store.options?.labyrinthCrates || []" :key="c.hrid" :label="c.name" :value="c.hrid" />
         </el-select>
       </div>
       <div class="row" style="margin-bottom: 12px">
-        <el-checkbox v-model="buy">也推荐可买的装备和技能书</el-checkbox>
-        <template v-if="buy"><span class="muted">单件最多花</span><el-input-number v-model="maxSpend" :min="0" :step="100" size="small" style="width: 130px" /><span class="muted">M（0 = 不限）</span></template>
+        <el-checkbox v-model="buy">{{ t("也推荐可买的装备和技能书") }}</el-checkbox>
+        <template v-if="buy"><span class="muted">{{ t("单件最多花") }}</span><el-input-number v-model="maxSpend" :min="0" :step="100" size="small" style="width: 130px" /><span class="muted">{{ t("M（0 = 不限）") }}</span></template>
       </div>
-      <JobRunner name="labyrinth" type="labyrinth" :params="params" label="开始推荐" @result="r => (result = r)" />
+      <JobRunner name="labyrinth" type="labyrinth" :params="params" :label="t('开始推荐')" @result="r => (result = r)" />
     </el-card>
 
     <el-card v-if="rows.length">
       <template #header>
         <div class="row">
-          <b>推荐设置</b>
-          <span class="muted">有效等级 {{ result.effective }}（战斗 {{ result.combatLevel }}，补给箱 {{ crateNames(result.crates) }}）· 阈值 {{ Math.round(result.threshold * 100) }}%</span>
+          <b>{{ t("推荐设置") }}</b>
+          <span class="muted">{{ t("有效等级 {eff}（战斗 {lv}，补给箱 {crates}）· 阈值 {thr}%", { eff: result.effective, lv: result.combatLevel, crates: crateNames(result.crates), thr: Math.round(result.threshold * 100) }) }}</span>
         </div>
       </template>
       <el-table :data="rows" size="small">
-        <el-table-column label="迷宫怪" prop="name" width="110" />
-        <el-table-column label="配装" width="140"><template #default="{ row }">{{ row.loadoutName || "—" }}</template></el-table-column>
-        <el-table-column label="现在的设置" width="190">
+        <el-table-column :label="t('迷宫怪')" prop="name" width="110" />
+        <el-table-column :label="t('配装')" width="140"><template #default="{ row }">{{ row.loadoutName || "—" }}</template></el-table-column>
+        <el-table-column :label="t('现在的设置')" width="190">
           <template #default="{ row }">
             {{ signed(row.gameSetting) }}
-            <span v-if="row.gameSettingP != null" class="muted">{{ result.effective + row.gameSetting - 1 }} 级 · 通关率 {{ pct(row.gameSettingP) }}</span>
+            <span v-if="row.gameSettingP != null" class="muted">{{ t("{lv} 级 · 通关率 {p}", { lv: result.effective + row.gameSetting - 1, p: pct(row.gameSettingP) }) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="现在配装推荐" width="170">
-          <template #default="{ row }"><b>{{ signed(row.current.setting) }}</b> <span class="muted">{{ row.current.level }} 级 · 第 {{ floorOf(row.current.level) }} 层</span></template>
+        <el-table-column :label="t('现在配装推荐')" width="170">
+          <template #default="{ row }"><b>{{ signed(row.current.setting) }}</b> <span class="muted">{{ t("{lv} 级 · 第 {f} 层", { lv: row.current.level, f: floorOf(row.current.level) }) }}</span></template>
         </el-table-column>
-        <el-table-column label="换装换技能后" width="190">
+        <el-table-column :label="t('换装换技能后')" width="190">
           <template #default="{ row }">
             <b :class="row.best.setting > row.current.setting ? 'good' : ''">{{ signed(row.best.setting) }}</b>
-            <span v-if="row.best.setting > row.current.setting" class="good">（多 {{ row.best.setting - row.current.setting }} 级）</span>
-            <span class="muted"> 第 {{ floorOf(row.best.level) }} 层</span>
+            <span v-if="row.best.setting > row.current.setting" class="good">{{ t("（多 {n} 级）", { n: row.best.setting - row.current.setting }) }}</span>
+            <span class="muted"> {{ t("第 {f} 层", { f: floorOf(row.best.level) }) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="平均击杀" width="90"><template #default="{ row }">{{ sec(row.best.avgClear) }}</template></el-table-column>
-        <el-table-column label="单买一样最多到">
+        <el-table-column :label="t('平均击杀')" width="90"><template #default="{ row }">{{ sec(row.best.avgClear) }}</template></el-table-column>
+        <el-table-column :label="t('单买一样最多到')">
           <template #default="{ row }">
-            <template v-if="row.bestBuy">{{ signed(row.bestBuy.setting) }}：{{ row.bestBuy.label }}（{{ money(row.bestBuy.cost) }}）</template>
+            <template v-if="row.bestBuy">{{ t("{s}：{item}（{cost}）", { s: signed(row.bestBuy.setting), item: row.bestBuy.label, cost: money(row.bestBuy.cost) }) }}</template>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
@@ -135,19 +136,19 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
       <el-collapse-item v-for="r in rows" :key="r.monster" :name="r.monster">
         <template #title>
           <b style="margin-right: 8px">{{ r.name }}</b>
-          <span class="muted">配装 {{ r.loadoutName || "—" }}{{ sourceText[r.loadoutSource] || "" }} · 推荐 {{ signed(r.current.setting) }} → {{ signed(r.best.setting) }}</span>
+          <span class="muted">{{ t("配装 {name}", { name: r.loadoutName || "—" }) }}{{ sourceText[r.loadoutSource] ? t(sourceText[r.loadoutSource]) : "" }} · {{ t("推荐 {from} → {to}", { from: signed(r.current.setting), to: signed(r.best.setting) }) }}</span>
         </template>
         <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(360px, 1fr))">
           <div>
-            <div class="muted" style="margin-bottom: 4px">装备（<span class="good">绿色</span> = 要换的，括号里是配装里现在的）</div>
+            <div class="muted" style="margin-bottom: 4px">{{ t("装备（") }}<span class="good">{{ t("绿色") }}</span>{{ t(" = 要换的，括号里是配装里现在的）") }}</div>
             <div v-for="e in r.best.equipment.filter(e => e.itemHrid || r.current.equipment.find(x => x.slot === e.slot)?.itemHrid)" :key="e.slot" class="row">
-              <span style="width: 40px" class="muted">{{ e.slotName }}</span>
+              <span style="min-width: 40px" class="muted">{{ e.slotName }}</span>
               <span :class="changed(r, e) ? 'good' : ''">{{ e.name }}<template v-if="e.itemHrid"> +{{ e.enhancementLevel }}</template></span>
-              <span v-if="changed(r, e)" class="muted">（{{ r.current.equipment.find(x => x.slot === e.slot)?.name || "空" }}<template v-if="r.current.equipment.find(x => x.slot === e.slot)?.itemHrid"> +{{ r.current.equipment.find(x => x.slot === e.slot).enhancementLevel }}</template>）</span>
+              <span v-if="changed(r, e)" class="muted">{{ t("（") }}{{ r.current.equipment.find(x => x.slot === e.slot)?.name || t("空") }}<template v-if="r.current.equipment.find(x => x.slot === e.slot)?.itemHrid"> +{{ r.current.equipment.find(x => x.slot === e.slot).enhancementLevel }}</template>{{ t("）") }}</span>
             </div>
           </div>
           <div>
-            <div class="muted" style="margin-bottom: 4px">技能与触发<span v-if="abilitiesChanged(r)" class="good">（有改动）</span></div>
+            <div class="muted" style="margin-bottom: 4px">{{ t("技能与触发") }}<span v-if="abilitiesChanged(r)" class="good">{{ t("（有改动）") }}</span></div>
             <div v-for="(a, i) in r.best.abilities" :key="i" class="row">
               <template v-if="a">
                 <span>{{ a.name }} Lv.{{ a.level }}</span>
@@ -157,16 +158,16 @@ const abilitiesChanged = r => JSON.stringify(r.best.abilities) !== JSON.stringif
           </div>
         </div>
         <template v-if="r.purchases?.length">
-          <div class="muted" style="margin: 12px 0 4px">单买一样（装备或技能书，在换装换技能后的配置上替换，各样分别比较，不叠加）</div>
+          <div class="muted" style="margin: 12px 0 4px">{{ t("单买一样（装备或技能书，在换装换技能后的配置上替换，各样分别比较，不叠加）") }}</div>
           <el-table :data="r.purchases" size="small">
-            <el-table-column label="格子" prop="slotName" width="70" />
-            <el-table-column label="买什么"><template #default="{ row }">{{ row.label }}</template></el-table-column>
-            <el-table-column label="花费" width="110" align="right"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
-            <el-table-column label="怎么买" prop="how" />
-            <el-table-column label="推荐设置" width="140" align="right"><template #default="{ row }">{{ signed(row.setting) }}（多 {{ row.gain }} 级）</template></el-table-column>
+            <el-table-column :label="t('格子')" prop="slotName" width="70" />
+            <el-table-column :label="t('买什么')"><template #default="{ row }">{{ row.label }}</template></el-table-column>
+            <el-table-column :label="t('花费')" width="110" align="right"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
+            <el-table-column :label="t('怎么买')" prop="how" />
+            <el-table-column :label="t('推荐设置')" width="140" align="right"><template #default="{ row }">{{ signed(row.setting) }}{{ t("（多 {n} 级）", { n: row.gain }) }}</template></el-table-column>
           </el-table>
         </template>
-        <div v-else-if="buy" class="muted" style="margin-top: 8px">没有找到单买一样就能提高设置的装备或技能书</div>
+        <div v-else-if="buy" class="muted" style="margin-top: 8px">{{ t("没有找到单买一样就能提高设置的装备或技能书") }}</div>
       </el-collapse-item>
     </el-collapse>
   </div>

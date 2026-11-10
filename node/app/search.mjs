@@ -1,4 +1,5 @@
 // Successive halving over candidate team configurations.
+import { t } from "./lang.mjs"
 import { paired, seedList } from "./evaluator.mjs"
 
 /** Runs `fn` over `items` with at most `limit` in flight. */
@@ -97,7 +98,7 @@ export async function confirmAdaptive(ev, common, stages, cur, challengers, { se
   let open = new Set(challengers.map((_, k) => k + 1))
   for (let n = 0, want = last.seeds * 4; ; want = Math.min(maxSeeds, want * 2)) {
     const seeds = seedList(seedBase, want).slice(n)
-    api.progress(0, 1, `${label}（${hours} 小时 × ${want} 次）`)
+    api.progress(0, 1, t("{label}（{h} 小时 × {n} 次）", { label, h: hours, n: want }))
     const rs = await Promise.all(all.map((c, i) => (i === 0 || open.has(i) ? ev.evaluate(c.members, common.target, { hours, seeds, extra: common.extra, objective: common.objective, signal: common.signal }) : null)))
     rs.forEach((r, i) => {
       if (!r) return

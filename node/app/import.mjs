@@ -1,6 +1,7 @@
 // Game data -> player configs. Port of the combat-sim site's import path (CombatHeader `hu`, `q0`
 // current character, `U0` shared profile, `qr` normalization) applied to the envelope our
 // userscript builds on the game page (same shape as the site's data bridge: members[]).
+import { t } from "./lang.mjs"
 import { combatLevel as combatLevelOf, normalizeConditions } from "./model.mjs"
 
 const LEVEL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
@@ -576,7 +577,7 @@ export function importMember(m, payload, base) {
   const e = payload?.profile && typeof payload.profile === "object" && payload.profile.sharableCharacter ? payload.profile : payload
   if (e?.sharableCharacter && Array.isArray(e.characterSkills)) return fromSharedProfile(m, payload, base)
   if (e?.character && typeof e.character === "object" && Array.isArray(e.characterSkills)) return fromCurrentCharacter(m, e, base)
-  throw new Error("无法识别的角色数据格式")
+  throw new Error(t("无法识别的角色数据格式"))
 }
 
 /**
@@ -598,7 +599,7 @@ export function importTeam(m, envelope) {
       p.source = mem.isCurrent ? "current" : "shared"
       players.push(p)
     } catch (e) {
-      problems.push(`${mem.characterName || `队员${i + 1}`}: ${e.message}`)
+      problems.push(`${mem.characterName || t("队员{n}", { n: i + 1 })}: ${e.message}`)
     }
   })
   return { players, missing: envelope?.missingMembers || [], problems }

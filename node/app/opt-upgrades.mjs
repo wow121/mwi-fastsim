@@ -8,14 +8,17 @@
 import { nestedApi, pool } from "./search.mjs"
 import { seedList, unpaired, withRunCache } from "./evaluator.mjs"
 import { guildBuffName, zh } from "./i18n.mjs"
+import { joinList, t, tk } from "./lang.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const ARTISAN = 0.89
 const MIRROR = "/items/philosophers_mirror"
 const INF = Number.POSITIVE_INFINITY
 const SKILL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
-export const SKILL_ZH = { stamina: "耐力", intelligence: "智力", attack: "攻击", melee: "近战", defense: "防御", ranged: "远程", magic: "魔法" }
-export const SLOT_ZH = { weapon: "武器", off_hand: "副手", head: "头部", body: "身体", legs: "腿部", hands: "手部", feet: "脚部", back: "背部", neck: "项链", earrings: "耳环", ring: "戒指", pouch: "袋子" }
+// display names in the UI language: reading SKILL_ZH[s] / SLOT_ZH[slot] translates (t) the key
+const translated = keys => new Proxy(keys, { get: (o, k) => (typeof k === "string" && o[k] ? t(o[k]) : o[k]) })
+export const SKILL_ZH = translated({ stamina: tk("耐力"), intelligence: tk("智力"), attack: tk("攻击"), melee: tk("近战"), defense: tk("防御"), ranged: tk("远程"), magic: tk("魔法") })
+export const SLOT_ZH = translated({ weapon: tk("武器"), off_hand: tk("副手"), head: tk("头部"), body: tk("身体"), legs: tk("腿部"), hands: tk("手部"), feet: tk("脚部"), back: tk("背部"), neck: tk("项链"), earrings: tk("耳环"), ring: tk("戒指"), pouch: tk("袋子") })
 
 // the site's per-class "upper replacement" targets (simulationStatistics `re`)
 const ACC = { neck: "/items/philosophers_necklace", earrings: "/items/philosophers_earrings", ring: "/items/philosophers_ring", pouch: "/items/guzzling_pouch" }
@@ -166,21 +169,21 @@ export class GearPrices {
     const tr = f.refined ? [] : null
     this.tables.set(f.base, tb)
     if (tr) this.tables.set(f.refined, tr)
-    const mirror = (x, t, n) => {
+    const mirror = (x, tab, n) => {
       if (n < 2) return null
-      const p = this.padSource(x, n - 2, t)
-      return { cost: t[n - 1].cost + p.cost + this.mirror, how: `+${n - 1} 加垫子 +${n - 2} 加镜子`, kind: "mirror", pad: p.h }
+      const p = this.padSource(x, n - 2, tab)
+      return { cost: tab[n - 1].cost + p.cost + this.mirror, how: t("+{main} 加垫子 +{pad} 加镜子", { main: n - 1, pad: n - 2 }), kind: "mirror", pad: p.h }
     }
     const better = (a, b) => (b && b.cost < a.cost ? b : a)
     for (let n = 0; n <= this.cap; n++) {
-      let b = better({ cost: this.quote(f.base, n).ask, how: "市场买", kind: "market" }, mirror(f.base, tb, n))
+      let b = better({ cost: this.quote(f.base, n).ask, how: t("市场买"), kind: "market" }, mirror(f.base, tb, n))
       tb.push(b)
       if (!tr) continue
-      let r = better({ cost: this.quote(f.refined, n).ask, how: "市场买", kind: "market" }, mirror(f.refined, tr, n))
-      r = better(r, { cost: b.cost + f.refineCost, how: `买普通 +${n} 自己精炼`, kind: "refine" })
+      let r = better({ cost: this.quote(f.refined, n).ask, how: t("市场买"), kind: "market" }, mirror(f.refined, tr, n))
+      r = better(r, { cost: b.cost + f.refineCost, how: t("买普通 +{n} 自己精炼", { n }), kind: "refine" })
       tr.push(r)
       if (r.kind !== "refine") {
-        b = better(b, { cost: r.cost - f.unrefineValue, how: `买精炼 +${n} 解精炼（拿回一半材料）`, kind: "unrefine" })
+        b = better(b, { cost: r.cost - f.unrefineValue, how: t("买精炼 +{n} 解精炼（拿回一半材料）", { n }), kind: "unrefine" })
         tb[n] = b
       }
     }
@@ -238,7 +241,7 @@ export class GearPrices {
   transition(h0, n0, h, n) {
     const sell = this.value(h0, n0)
     const buy = this.acq(h)[n]
-    let best = { cost: buy.cost - sell, how: `${h0 ? "卖旧，" : ""}${buy.how}` }
+    let best = { cost: buy.cost - sell, how: (h0 ? t("卖旧，") : "") + buy.how }
     if (!h0) return best
     const f = this.family(h)
     if (this.family(h0).base !== f.base) return best
@@ -250,22 +253,22 @@ export class GearPrices {
     // keep the held piece as the main item: mirror it up, refine if needed
     if ((h0 === h || (h0 === f.base && h === f.refined)) && n >= n0) {
       const c = up(n0, n) + (h0 === h ? 0 : f.refineCost)
-      const how = [n > n0 ? `镜子把手上的 +${n0} 升到 +${n}` : "", h0 === h ? "" : "自己精炼"].filter(Boolean).join("，")
+      const how = [n > n0 ? t("镜子把手上的 +{from} 升到 +{n}", { from: n0, n }) : "", h0 === h ? "" : t("自己精炼")].filter(Boolean).join(t("，"))
       if (c < best.cost) best = { cost: c, how }
     }
     // un-refine the held refined piece, then use it as the normal main item
     if (h0 === f.refined && h === f.base && n >= n0) {
       const c = -f.unrefineValue + up(n0, n)
-      if (c < best.cost) best = { cost: c, how: `解精炼手上的 +${n0}（拿回一半材料）${n > n0 ? `，镜子升到 +${n}` : ""}` }
+      if (c < best.cost) best = { cost: c, how: t("解精炼手上的 +{n}（拿回一半材料）", { n: n0 }) + (n > n0 ? t("，镜子升到 +{n}", { n }) : "") }
     }
     if (h0 === f.refined && h === f.base && n >= n0 + 2) {
       const c = -f.unrefineValue + this.acq(h)[n0 + 1].cost + this.mirror + up(n0 + 2, n)
-      if (c < best.cost) best = { cost: c, how: `解精炼手上的 +${n0} 当垫子，买 +${n0 + 1} 加镜子${n > n0 + 2 ? `，再升到 +${n}` : ""}` }
+      if (c < best.cost) best = { cost: c, how: t("解精炼手上的 +{n} 当垫子，买 +{main} 加镜子", { n: n0, main: n0 + 1 }) + (n > n0 + 2 ? t("，再升到 +{n}", { n }) : "") }
     }
     // use the held piece as the pad: buy +(n0+1), then mirror up
     if ((h0 === h || h0 === f.base) && n >= n0 + 2) {
       const c = this.acq(h)[n0 + 1].cost + this.mirror + up(n0 + 2, n)
-      if (c < best.cost) best = { cost: c, how: `买 +${n0 + 1}，手上的 +${n0} 当垫子加镜子${n > n0 + 2 ? `，再升到 +${n}` : ""}` }
+      if (c < best.cost) best = { cost: c, how: t("买 +{main}，手上的 +{n} 当垫子加镜子", { n: n0, main: n0 + 1 }) + (n > n0 + 2 ? t("，再升到 +{n}", { n }) : "") }
     }
     return best
   }
@@ -278,7 +281,7 @@ export function memberSlots(ctx, gp, members, idx, opts) {
   const maps = m.$e
   const cfg = members[idx]
   const nm = h => zh(maps, h)
-  const who = cfg.name || `队员${idx + 1}`
+  const who = cfg.name || t("队员{n}", { n: idx + 1 })
   const out = []
   const cls = classOf(maps, cfg.equipment?.weapon?.itemHrid)
   const upper = cls ? UPPER[cls] : {}
@@ -290,7 +293,7 @@ export function memberSlots(ctx, gp, members, idx, opts) {
     const e = cfg.equipment?.[slot] || {}
     const h0 = e.itemHrid || ""
     const n0 = Math.max(0, Math.floor(Number(e.enhancementLevel || 0)))
-    const states = [{ label: h0 ? `${nm(h0)} +${n0}` : "空", h: h0, n: n0, fam: 0, ref: h0 && h0 === gp.family(h0).refined ? 1 : 0 }]
+    const states = [{ label: h0 ? `${nm(h0)} +${n0}` : t("空"), h: h0, n: n0, fam: 0, ref: h0 && h0 === gp.family(h0).refined ? 1 : 0 }]
     const add = (h, n, fam) => {
       if (states.some(s => s.h === h && s.n === n)) return
       const t = gp.transition(h0, n0, h, n)
@@ -361,8 +364,8 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       },
     }))
     out.push({
-      key: `${idx}:ability${i}`, member: idx, memberName: who, slot: `ability${i}`, slotName: `技能 ${i + 1}`, states,
-      trans: (x, y) => (y.level > x.level ? { cost: count(x.level, y.level) * price, how: `${count(x.level, y.level)} 本书` } : { cost: INF, how: "" }),
+      key: `${idx}:ability${i}`, member: idx, memberName: who, slot: `ability${i}`, slotName: t("技能 {n}", { n: i + 1 }), states,
+      trans: (x, y) => (y.level > x.level ? { cost: count(x.level, y.level) * price, how: t("{n} 本书", { n: count(x.level, y.level) }) } : { cost: INF, how: "" }),
       value: st => count(from, st.level) * resale(b.item),
       // combat score: the books from level 0 (MWITools: experience / book experience + 1 books)
       score: st => (opts.fair ? (Number(xpTable[st.level] || 0) / b.xp + 1) * opts.fair(b.item, 0) : 0),
@@ -400,12 +403,12 @@ export function memberSlots(ctx, gp, members, idx, opts) {
       if (levels.length < 2) continue
       const name = zh(maps, room.hrid)
       const states = levels.map(l => ({
-        label: `${name} ${l} 级`, level: l,
+        label: t("{name} {l} 级", { name, l }), level: l,
         apply: c => { c.houseRooms = { ...(c.houseRooms || {}), [room.hrid]: l } },
       }))
       out.push({
-        key: `${idx}:house:${room.hrid}`, member: idx, memberName: who, slot: `house:${room.hrid}`, slotName: `房子·${name}`, states, house: true,
-        trans: (x, y) => (y.level > x.level ? { cost: stepCost(x.level, y.level), how: `升级房子（${x.level} → ${y.level} 级）` } : { cost: INF, how: "" }),
+        key: `${idx}:house:${room.hrid}`, member: idx, memberName: who, slot: `house:${room.hrid}`, slotName: t("房子·{name}", { name }), states, house: true,
+        trans: (x, y) => (y.level > x.level ? { cost: stepCost(x.level, y.level), how: t("升级房子（{from} → {to} 级）", { from: x.level, to: y.level }) } : { cost: INF, how: "" }),
         value: st => {
           let v = 0
           for (let L = from + 1; L <= st.level; L++) v += levelValue(L)
@@ -464,14 +467,14 @@ export function guildSlots(maps, members, opts = {}) {
     out.push({
       key: `guild:${g.hrid}`, hrid: g.hrid, name,
       states: levels.map(l => ({
-        label: `${name} ${l} 级`, level: l,
+        label: t("{name} {l} 级", { name, l }), level: l,
         apply: team => team.forEach(c => { c.guildBuffs = { ...(c.guildBuffs || {}), [g.hrid]: target(c, l) } }),
       })),
       cost,
       costText: l => {
         const { tokens, credits } = cost(l)
-        const cr = Object.entries(credits).map(([h, n]) => `${zh(maps, h)} ${n.toLocaleString()}`).join("、")
-        return `${tokens.toLocaleString()} 公会代币${cr ? ` + ${cr}` : ""}`
+        const cr = joinList(Object.entries(credits).map(([h, n]) => `${zh(maps, h)} ${n.toLocaleString()}`))
+        return t("{n} 公会代币", { n: tokens.toLocaleString() }) + (cr ? ` + ${cr}` : "")
       },
     })
   }
@@ -648,7 +651,7 @@ async function searchPlan(P, signal) {
   return { plan, ...r }
 }
 
-const unlockText = st => (st?.unlock > 0.05 ? `（第 ${st.unlock.toFixed(1)} 天够等级）` : "")
+const unlockText = st => (st?.unlock > 0.05 ? t("（第 {d} 天够等级）", { d: st.unlock.toFixed(1) }) : "")
 
 /**
  * Combat levels farmed over the plan: from the synced experience and the experience per day at the
@@ -733,7 +736,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
     for (const k of o.optimize) {
       const cur = members[k].equipment?.charm
       const h0 = cur?.itemHrid || ""
-      opts[k] = [{ hrid: h0, label: h0 ? `${zh(o.maps, h0)}${cur.enhancementLevel ? ` +${cur.enhancementLevel}` : ""}（现在戴的）` : "不戴护符（现在）", cost: 0, resale: 0, req: [], current: true, rates: null }]
+      opts[k] = [{ hrid: h0, label: h0 ? `${zh(o.maps, h0)}${cur.enhancementLevel ? ` +${cur.enhancementLevel}` : ""}` + t("（现在戴的）") : t("不戴护符（现在）"), cost: 0, resale: 0, req: [], current: true, rates: null }]
       jobs.push({ k, x: opts[k][0] })
       for (const sk of SKILL_KEYS) for (const t of TIERS) {
         const h = `/items/${t}_${sk}_charm`
@@ -753,7 +756,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
       if (!x.current) mem[k].equipment = { ...mem[k].equipment, charm: { itemHrid: x.hrid, enhancementLevel: 0 } }
       const r = await ev.evaluate(mem, o.target, quick)
       x.raw = Object.fromEntries(SKILL_KEYS.map(s => [s, Math.max(0, Number(r.mean.players[k]?.[`xp_${s}`] || 0) * 24)]))
-      api.progress(++done, jobs.length, "护符经验")
+      api.progress(++done, jobs.length, t("护符经验"))
     })
     for (const k of o.optimize) {
       const now = baseRates(k)
@@ -761,7 +764,7 @@ async function levelGrowth(ev, members, baseline, o, api) {
       for (const x of opts[k]) x.rates = Object.fromEntries(SKILL_KEYS.map(s => [s, cur[s] > 0 ? (now[s] * x.raw[s]) / cur[s] : x.raw[s]]))
       plan[k] = []
     }
-    api.log(`护符：每人 ${opts.find(Boolean)?.length - 1 || 0} 种可买，按 ${times.length} 个阶段规划刷经验时戴哪个`)
+    api.log(t("护符：每人 {n} 种可买，按 {stages} 个阶段规划刷经验时戴哪个", { n: opts.find(Boolean)?.length - 1 || 0, stages: times.length }))
     const owned = members.map(() => new Set())
     const worn = members.map(c => c.equipment?.charm?.itemHrid || "")
     const bounds = [0, ...times]
@@ -837,8 +840,8 @@ async function levelGrowth(ev, members, baseline, o, api) {
           return { member: k, name: o.name(k), charm: per.charm, focus: per.focus, cost: per.bought, values: SKILL_KEYS.filter(s => per.value[s] !== undefined).map(s => ({ skill: s, name: SKILL_ZH[s], perLevel: per.value[s] })) }
         }),
       })
-      api.log(`  第 ${a}–${b} 天：${stages.at(-1).members.map(m => `${m.name} 戴${m.charm}（每级：${m.values.map(v => `${v.name} ${fmtM(v.perLevel)}`).join("，") || "—"}）`).join("；")}`)
-      api.progress(x + 1, bounds.length - 1, "护符阶段")
+      api.log("  " + t("第 {a}–{b} 天：", { a, b }) + stages.at(-1).members.map(m => t("{name} 戴{charm}（每级：{values}）", { name: m.name, charm: m.charm, values: m.values.map(v => `${v.name} ${fmtM(v.perLevel)}`).join(t("，")) || "—" })).join(t("；")))
+      api.progress(x + 1, bounds.length - 1, t("护符阶段"))
     }
   }
 
@@ -846,15 +849,15 @@ async function levelGrowth(ev, members, baseline, o, api) {
   const configs = times.map(T => members.map((_, k) => levelsAt(k, T)))
   const keys = [...new Set(configs.map(c => JSON.stringify(c)).filter(c => c !== start))]
   const noXp = members.map((c, k) => (c.experience ? null : o.name(k))).filter(Boolean)
-  api.log(`考虑战斗等级增长：按${noXp.length ? "" : "同步时的经验和"}现在在这里每天的经验推算${noXp.length ? `（${noXp.join("、")} 没有当前经验数据，按整级算）` : ""}，模拟 ${keys.length} 个时间点的等级`)
+  api.log((noXp.length ? t("考虑战斗等级增长：按现在在这里每天的经验推算（{names} 没有当前经验数据，按整级算），模拟 {n} 个时间点的等级", { names: joinList(noXp), n: keys.length }) : t("考虑战斗等级增长：按同步时的经验和现在在这里每天的经验推算，模拟 {n} 个时间点的等级", { n: keys.length })))
   api.remaining?.(ahead(0, 0, keys.length))
   let done = 0
   const total = keys.length ? keys.length + 1 : 0
   const base = keys.length ? await ev.evaluate(members, o.target, baseCfg) : null
-  if (base) api.progress(++done, total, "等级增长")
+  if (base) api.progress(++done, total, t("等级增长"))
   const evals = await pool(keys, 8, async key => {
     const r = await ev.evaluate(withLevels(JSON.parse(key)), o.target, cfg)
-    api.progress(++done, total, "等级增长")
+    api.progress(++done, total, t("等级增长"))
     return [key, r.mean.players.map((p, k) => (p.profitPerHour - base.mean.players[k].profitPerHour) * 24)]
   })
   const gainOf = new Map(evals)
@@ -863,9 +866,9 @@ async function levelGrowth(ev, members, baseline, o, api) {
   const changed = (k, T) => SKILL_KEYS.filter(s => levelAt(k, s, T) > lv0(k, s))
   members.forEach((_, k) => {
     const c = changed(k, H)
-    api.log(`  ${o.name(k)}：${c.length ? c.map(s => `${SKILL_ZH[s]} ${lv0(k, s)} → ${levelAt(k, s, H)}`).join("，") : "没有能升的等级"}（${H} 天）`)
+    api.log(`  ${o.name(k)}${t("：")}${c.length ? c.map(s => `${SKILL_ZH[s]} ${lv0(k, s)} → ${levelAt(k, s, H)}`).join(t("，")) : t("没有能升的等级")}` + t("（{d} 天）", { d: H }))
   })
-  times.forEach((t, x) => api.log(`  第 ${t} 天：只靠等级全队 ${gains[x].reduce((a, v) => a + v, 0) >= 0 ? "+" : ""}${fmtM(gains[x].reduce((a, v) => a + v, 0))}/天`))
+  times.forEach((day, x) => api.log("  " + t("第 {d} 天：只靠等级全队 {v}/天", { d: day, v: `${gains[x].reduce((a, v) => a + v, 0) >= 0 ? "+" : ""}${fmtM(gains[x].reduce((a, v) => a + v, 0))}` })))
   const report = {
     times,
     members: members.map((_, k) => ({
@@ -913,9 +916,9 @@ export async function adviseUpgrades(ev0, params, api) {
   const P0 = baseline.mean.profitPerHour * 24
   const own = baseline.mean.players.map(p => p.profitPerHour * 24)
   const income = members.map((_, k) => own[k] + otherIncome[k])
-  const name = k => members[k].name || `队员${k + 1}`
-  api.log(`当前全队利润 ${fmtM(P0)}/天，卖出税 ${(tax * 100).toFixed(1)}%，镜子 ${fmtM(gp.mirror)}`)
-  members.forEach((_, k) => api.log(`  ${name(k)}：现金 ${fmtM(budget[k])}，战斗利润 ${fmtM(own[k])}/天，其他收入 ${fmtM(otherIncome[k])}/天`))
+  const name = k => members[k].name || t("队员{n}", { n: k + 1 })
+  api.log(t("当前全队利润 {p}/天，卖出税 {tax}%，镜子 {mirror}", { p: fmtM(P0), tax: (tax * 100).toFixed(1), mirror: fmtM(gp.mirror) }))
+  members.forEach((_, k) => api.log("  " + t("{name}：现金 {cash}，战斗利润 {own}/天，其他收入 {other}/天", { name: name(k), cash: fmtM(budget[k]), own: fmtM(own[k]), other: fmtM(otherIncome[k]) })))
   // the re-check precision (also of the level growth, the charm values and the validation): 4× the
   // hours and 2× the runs of the screening, up to 48 hours × 32 runs. The level growth uses the same
   // seeds, so its base (and the first charm stage's) is the re-check's base again
@@ -948,16 +951,16 @@ export async function adviseUpgrades(ev0, params, api) {
   const maxGain = k => Math.max(0, ...(curve?.[k] || [{ g: 0 }]).map(p => p.g))
   const slots = slotsFor(maxGain, { unlockDay: growth?.unlockDay, unlockBy: growth ? horizons.at(-1) : 0 })
   const scores = members.map(c => combatScore(maps, c, fair))
-  api.log(`战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：${members.map((_, k) => `${name(k)} ${fmtScore(scores[k])}`).join("，")}`)
+  api.log(t("战斗评分（装备 + 战斗房子 + 已装备技能，不含公会）：") + members.map((_, k) => `${name(k)} ${fmtScore(scores[k])}`).join(t("，")))
   const jobs = slots.flatMap((sl, s) => sl.states.slice(1).map((st, k) => ({ s, j: k + 1, st })))
-  api.log(`${slots.length} 个位置，共 ${jobs.length} 个可达状态需要模拟`)
+  api.log(t("{slots} 个位置，共 {n} 个可达状态需要模拟", { slots: slots.length, n: jobs.length }))
   api.remaining?.(ahead("screen", jobs.length))
   let done = 0
   const evals = await pool(jobs, 32, async ({ s, j, st }) => {
     const mem = clone(members)
     st.apply(mem[slots[s].member])
     const r = await ev.evaluate(mem, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
-    api.progress(++done, jobs.length, "逐项模拟")
+    api.progress(++done, jobs.length, t("逐项模拟"))
     const dpv = r.mean.players.map((p, k) => (p.profitPerHour - baseline.mean.players[k].profitPerHour) * 24)
     return { s, j, dpv, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: unpaired(r.perSeed, baseline.perSeed) }
   })
@@ -1008,7 +1011,7 @@ export async function adviseUpgrades(ev0, params, api) {
   const planDpv = slots.map(sl => sl.states.map(() => members.map(() => 0)))
   let refBase = baseline
   if (picks.length) {
-    api.log(`初筛有 ${hopeful.length} 个可能划算的提升，复核${hopeful.length > top.length ? `最有希望的 ${top.length} 个` : "全部"}${below.length ? `，另加它们下面的 ${below.length} 个中间级` : ""}（每项 ${refineHours} 小时 × ${refineSeeds.length} 次，换一组随机种子）`)
+    api.log(t("初筛有 {n} 个可能划算的提升，", { n: hopeful.length }) + (hopeful.length > top.length ? t("复核最有希望的 {n} 个", { n: top.length }) : t("全部复核")) + (below.length ? t("，另加它们下面的 {n} 个中间级", { n: below.length }) : "") + t("（每项 {h} 小时 × {runs} 次，换一组随机种子）", { h: refineHours, runs: refineSeeds.length }))
     refBase = await ev.evaluate(members, target, { hours: refineHours, seeds: seedList(33333, refineSeeds.length * 4), extra, objective: "profit", signal: api.signal })
     const recheck = async ({ s, j, st }) => {
       const mem = clone(members)
@@ -1020,7 +1023,7 @@ export async function adviseUpgrades(ev0, params, api) {
     done = 0
     const again = await pool(picks, 32, async x => {
       const e = await recheck(x)
-      api.progress(++done, picks.length, "复核")
+      api.progress(++done, picks.length, t("复核"))
       return e
     })
     for (const e of again) {
@@ -1029,7 +1032,7 @@ export async function adviseUpgrades(ev0, params, api) {
       info[e.s][e.j] = e
       refined[e.s][e.j] = true
     }
-  } else if (refineTop) api.log("初筛没有找到可能在规划期内回本的提升")
+  } else if (refineTop) api.log(t("初筛没有找到可能在规划期内回本的提升"))
   // re-check turned off, or aiming at the combat score (there the profit only sets how fast the
   // money comes in, the choice is made by the score): the other states use the screening numbers
   if (!refineTop || mode === "score")
@@ -1060,13 +1063,13 @@ export async function adviseUpgrades(ev0, params, api) {
       const mem = clone(members)
       st.apply(mem)
       const r = await ev.evaluate(mem, target, { hours, seeds, extra, objective: "profit", signal: api.signal })
-      api.progress(++done, gjobs.length, "公会加成")
+      api.progress(++done, gjobs.length, t("公会加成"))
       return { g, j, st, dp: (r.mean.profitPerHour - baseline.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - baseline.mean.xpPerHour, sig: unpaired(r.perSeed, baseline.perSeed) }
     })
     for (const e of gevals) {
       rows.push({
-        id: `${e.g.key}#${e.j}`, member: -1, memberName: "全队（公会）", slotName: "公会", from: e.g.states[0].label, label: e.st.label, guild: true,
-        cost: null, guildTokens: e.g.cost(e.st.level).tokens, how: `个人公会加成升级（${e.g.costText(e.st.level)}，不花金币）`,
+        id: `${e.g.key}#${e.j}`, member: -1, memberName: t("全队（公会）"), slotName: t("公会"), from: e.g.states[0].label, label: e.st.label, guild: true,
+        cost: null, guildTokens: e.g.cost(e.st.level).tokens, how: t("个人公会加成升级（{cost}，不花金币）", { cost: e.g.costText(e.st.level) }),
         loss: 0, dProfitPerDay: e.dp, dOwnPerDay: null, dXpPerHour: e.dXp, significance: e.sig,
         net: Object.fromEntries(horizons.map(d => [d, e.dp * d])), paybackDays: null,
       })
@@ -1095,7 +1098,7 @@ export async function adviseUpgrades(ev0, params, api) {
       const mem = clone(members)
       slots[s].states[j].apply(mem[slots[s].member])
       const r = await ev.evaluate(mem, target, { ...valCfg, signal: api.signal })
-      api.progress(++n, list.length, "验证选中的提升")
+      api.progress(++n, list.length, t("验证选中的提升"))
       const e = {
         s, j, dpv: r.mean.players.map((p, k) => (p.profitPerHour - valBase.mean.players[k].profitPerHour) * 24),
         dp: (r.mean.profitPerHour - valBase.mean.profitPerHour) * 24, dXp: r.mean.xpPerHour - valBase.mean.xpPerHour, sig: unpaired(r.perSeed, valBase.perSeed),
@@ -1117,7 +1120,7 @@ export async function adviseUpgrades(ev0, params, api) {
   for (const [x, days] of horizons.entries()) {
     if (api.signal.aborted) throw new Error("cancelled")
     api.remaining?.(ahead("plan", jobs.length, picks.length, horizons.length - x))
-    api.progress(0, 1, `规划 ${days} 天`)
+    api.progress(0, 1, t("规划 {d} 天", { d: days }))
     let P = { slots, dp: planDp, dpv: planDpv, L, Lend, S, pay, budget, income, days, mode, payback, curve, charges: growth?.charges }
     const levelGain = members.reduce((a, _, k) => a + gainAt(curve?.[k], days), 0)
     const gainOf = r => r.income - levelGain - income.reduce((a, v) => a + v, 0)
@@ -1133,7 +1136,7 @@ export async function adviseUpgrades(ev0, params, api) {
     for (let round = 0; round < 4; round++) {
       const todo = [...new Map(r.steps.filter(x => !validated[x.s][x.to]).map(x => [`${x.s}:${x.to}`, { s: x.s, j: x.to }])).values()]
       if (!todo.length) break
-      api.log(`${days} 天：计划里 ${todo.length} 项提升换一组随机种子再测一遍，用新数字重新规划`)
+      api.log(t("{d} 天：计划里 {n} 项提升换一组随机种子再测一遍，用新数字重新规划", { d: days, n: todo.length }))
       await validate(todo)
       r = await search(P)
     }
@@ -1145,9 +1148,9 @@ export async function adviseUpgrades(ev0, params, api) {
       P = { ...P, dp: planDp.map(row => row.map(v => v * scale)), dpv: planDpv.map(row => row.map(a => a.map(v => v * scale))) }
       r = await search(P)
       check = r.steps.length ? { ...(await measure(r.held, gainOf(r))), sum, scale } : null
-      api.log(`${days} 天：一起买实测只有逐项相加的 ${(scale * 100).toFixed(0)}%（提升之间有重叠），收益按这个比例打折后重新规划`)
+      api.log(t("{d} 天：一起买实测只有逐项相加的 {pct}%（提升之间有重叠），收益按这个比例打折后重新规划", { d: days, pct: (scale * 100).toFixed(0) }))
     }
-    api.log(`规划 ${days} 天用时 ${Date.now() - ts} ms（其中搜索 ${searchMs} ms）`)
+    api.log(t("规划 {d} 天用时 {ms} ms（其中搜索 {search} ms）", { d: days, ms: Date.now() - ts, search: searchMs }))
     const idleRun = runPlan([], P)
     const idle = idleRun.wealth
     const mem = clone(members)
@@ -1164,7 +1167,7 @@ export async function adviseUpgrades(ev0, params, api) {
     const scoreAfter = members.map((_, k) => scores[k] + r.held.reduce((a, j, s) => a + (slots[s].member === k ? S[s][j] - S[s][0] : 0), 0))
     const perMember = members.map((_, k) => ({ name: name(k), cash: r.cash[k], income: r.incomes[k], startIncome: income[k], score: scores[k], scoreAfter: scoreAfter[k] }))
     plans.push({ days, levelGain, wealth: r.wealth, idle, gain: r.wealth - idle, incomeGain: r.income - idleRun.income, scoreGain: r.score, steps, final, check, finalIncome: r.income, perMember, members: mem })
-    api.log(`${days} 天：${steps.length} 步，期末比不动多 ${fmtM(r.wealth - idle)}，日利润 +${fmtM(r.income - idleRun.income)}/天${curve ? `（另有等级提升 +${fmtM(levelGain)}/天）` : ""}，战斗评分 +${fmtScore(r.score)}${check ? `（终态实测 +${fmtM(check.actual)}/天，逐项相加估 +${fmtM(check.estimated)}/天）` : ""}`)
+    api.log(t("{d} 天：{n} 步，期末比不动多 {gain}，日利润 +{income}/天", { d: days, n: steps.length, gain: fmtM(r.wealth - idle), income: fmtM(r.income - idleRun.income) }) + (curve ? t("（另有等级提升 +{v}/天）", { v: fmtM(levelGain) }) : "") + t("，战斗评分 +{s}", { s: fmtScore(r.score) }) + (check ? t("（终态实测 +{actual}/天，逐项相加估 +{est}/天）", { actual: fmtM(check.actual), est: fmtM(check.estimated) }) : ""))
   }
   // the table with the numbers measured again for the plans
   for (const row of rows) {

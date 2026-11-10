@@ -2,10 +2,11 @@
 import { computed, ref } from "vue"
 import { ElMessage } from "element-plus"
 import { abilityName, call, clone, itemName, loadState, saveTeam, store } from "../api.js"
+import { dateTime, joinList, t, tk } from "../i18n.js"
 import TriggerEditor from "../components/TriggerEditor.vue"
 
-const SLOTS = [["weapon", "武器"], ["off_hand", "副手"], ["head", "头"], ["body", "身体"], ["legs", "腿"], ["hands", "手"], ["feet", "脚"], ["back", "背"], ["neck", "项链"], ["earrings", "耳环"], ["ring", "戒指"], ["pouch", "袋子"], ["charm", "护符"], ["trinket", "饰品"]]
-const SKILLS = [["stamina", "耐力"], ["intelligence", "智力"], ["attack", "攻击"], ["melee", "近战"], ["defense", "防御"], ["ranged", "远程"], ["magic", "魔法"]]
+const SLOTS = [["weapon", tk("武器")], ["off_hand", tk("副手")], ["head", tk("头")], ["body", tk("身体")], ["legs", tk("腿")], ["hands", tk("手")], ["feet", tk("脚")], ["back", tk("背")], ["neck", tk("项链")], ["earrings", tk("耳环")], ["ring", tk("戒指")], ["pouch", tk("袋子")], ["charm", tk("护符")], ["trinket", tk("饰品")]]
+const SKILLS = [["stamina", tk("耐力")], ["intelligence", tk("智力")], ["attack", tk("攻击")], ["melee", tk("近战")], ["defense", tk("防御")], ["ranged", tk("远程")], ["magic", tk("魔法")]]
 const o = computed(() => store.options)
 const dirty = ref(false)
 const editing = ref(store.team.members[0]?.id ?? null)
@@ -15,7 +16,7 @@ const loadoutName = ref("")
 function toggle(id, on) {
   const sel = store.team.selected.filter(x => x !== String(id))
   if (on) {
-    if (sel.length >= 5) return ElMessage.warning("最多 5 人")
+    if (sel.length >= 5) return ElMessage.warning(t("最多 5 人"))
     sel.push(String(id))
   }
   store.team.selected = sel
@@ -77,23 +78,23 @@ const shrineOf = h => {
   const v = member.value?.guildBuffCaps?.[h]
   return v == null || !Number.isFinite(Number(v)) ? null : Number(v)
 }
-const houseGroups = computed(() => [["战斗房屋", o.value.houseRooms.filter(h => h.combat)], ["其他房屋（只加全局经验和稀有发现）", o.value.houseRooms.filter(h => !h.combat)]])
+const houseGroups = computed(() => [[t("战斗房屋"), o.value.houseRooms.filter(h => h.combat)], [t("其他房屋（只加全局经验和稀有发现）"), o.value.houseRooms.filter(h => !h.combat)]])
 async function save() {
   await saveTeam()
   dirty.value = false
-  ElMessage.success("已保存")
+  ElMessage.success(t("已保存"))
 }
 async function reload() {
   await loadState()
   dirty.value = false
 }
 async function saveLoadout() {
-  if (!loadoutName.value.trim()) return ElMessage.warning("请输入方案名称")
+  if (!loadoutName.value.trim()) return ElMessage.warning(t("请输入方案名称"))
   const list = store.loadouts.filter(l => l.name !== loadoutName.value.trim())
   list.unshift({ name: loadoutName.value.trim(), savedAt: Date.now(), members: clone(store.team.members), selected: [...store.team.selected] })
   await call("PUT", "/api/loadouts", list)
   store.loadouts = list
-  ElMessage.success("方案已保存")
+  ElMessage.success(t("方案已保存"))
 }
 async function useLoadout(l) {
   store.team.members = clone(l.members)
@@ -108,34 +109,34 @@ async function deleteLoadout(l) {
 
 <template>
   <div class="page">
-    <h2>队伍</h2>
+    <h2>{{ t("队伍") }}</h2>
     <el-alert v-if="!store.team.members.length || store.team.sample" type="info" :closable="false" style="margin-bottom: 12px">
       <template #title>
-        {{ store.team.sample ? "当前是测试队伍。" : "还没有队伍数据。" }}装好 <el-link type="primary" href="https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js" target="_blank">mwi-fastsim 油猴脚本</el-link>后刷新游戏页面（队长或任一队员的号都行），{{ store.mode === "browser" ? "左下角显示“已读取”后再刷新本页，会自动导入。" : "左下角显示“已同步”后再刷新本页。" }}
+        {{ store.team.sample ? t("当前是测试队伍。") : t("还没有队伍数据。") }}{{ t("装好") }} <el-link type="primary" href="https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js" target="_blank">{{ t("mwi-fastsim 油猴脚本") }}</el-link>{{ t("后刷新游戏页面（队长或任一队员的号都行），") }}{{ store.mode === "browser" ? t("左下角显示“已读取”后再刷新本页，会自动导入。") : t("左下角显示“已同步”后再刷新本页。") }}
       </template>
     </el-alert>
 
     <el-alert v-if="store.team.source === 'game' && store.team.missing?.length" type="warning" :closable="false" style="margin-bottom: 12px">
-      <template #title>缺少队友数据：{{ store.team.missing.join("、") }}。在游戏里点开他们的资料页，脚本会自动补上。</template>
+      <template #title>{{ t("缺少队友数据：{list}。在游戏里点开他们的资料页，脚本会自动补上。", { list: joinList(store.team.missing) }) }}</template>
     </el-alert>
 
     <el-alert v-if="store.team.dtoCheck" :type="store.team.dtoCheck.ok === true ? 'success' : store.team.dtoCheck.ok === false ? 'warning' : 'info'" :closable="false" style="margin-bottom: 12px">
-      <template #title>数据核对：{{ store.team.dtoCheck.summary }}</template>
+      <template #title>{{ t("数据核对：") }}{{ store.team.dtoCheck.summary }}</template>
       <div v-for="d in store.team.dtoCheck.diffs || []" :key="d" class="muted">{{ d }}</div>
     </el-alert>
 
     <el-card>
       <template #header>
         <div class="row">
-          <b>出战成员</b><span class="muted">勾选参与模拟和优化的角色（最多 5 人）</span>
+          <b>{{ t("出战成员") }}</b><span class="muted">{{ t("勾选参与模拟和优化的角色（最多 5 人）") }}</span>
           <span style="flex: 1" />
-          <el-button size="small" @click="reload">重新读取</el-button>
-          <el-button size="small" type="primary" :disabled="!dirty" @click="save">保存修改</el-button>
+          <el-button size="small" @click="reload">{{ t("重新读取") }}</el-button>
+          <el-button size="small" type="primary" :disabled="!dirty" @click="save">{{ t("保存修改") }}</el-button>
         </div>
       </template>
       <div class="row">
         <el-check-tag v-for="m in store.team.members" :key="m.id" :checked="store.team.selected.includes(String(m.id))" @change="v => toggle(m.id, v)">
-          {{ m.name || `角色${m.id}` }}
+          {{ m.name || t("角色{id}", { id: m.id }) }}
         </el-check-tag>
       </div>
     </el-card>
@@ -143,17 +144,17 @@ async function deleteLoadout(l) {
     <el-card>
       <template #header>
         <div class="row">
-          <b>编辑角色</b>
+          <b>{{ t("编辑角色") }}</b>
           <el-radio-group v-model="editing" size="small">
-            <el-radio-button v-for="m in store.team.members" :key="m.id" :value="m.id">{{ m.name || `角色${m.id}` }}</el-radio-button>
+            <el-radio-button v-for="m in store.team.members" :key="m.id" :value="m.id">{{ m.name || t("角色{id}", { id: m.id }) }}</el-radio-button>
           </el-radio-group>
         </div>
       </template>
       <el-tabs v-if="member" @tab-change="() => {}">
-        <el-tab-pane label="装备">
+        <el-tab-pane :label="t('装备')">
           <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(330px, 1fr))">
             <div v-for="[slot, label] in SLOTS" :key="slot" class="row">
-              <span style="width: 40px" class="muted">{{ label }}</span>
+              <span style="width: 40px" class="muted">{{ t(label) }}</span>
               <el-select v-model="ensureSlot(member, slot).itemHrid" filterable clearable size="small" style="width: 200px" @change="dirty = true">
                 <el-option v-for="it in o.equipment[slot] || []" :key="it.hrid" :label="it.name" :value="it.hrid" />
               </el-select>
@@ -161,19 +162,19 @@ async function deleteLoadout(l) {
             </div>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="技能">
+        <el-tab-pane :label="t('技能')">
           <div v-for="(a, i) in member.abilities" :key="i" class="row" style="margin-bottom: 6px">
-            <span style="width: 70px" class="muted">{{ i === 0 ? "特殊技能" : `技能 ${i}` }}</span>
+            <span style="width: 70px" class="muted">{{ i === 0 ? t("特殊技能") : t("技能 {i}", { i }) }}</span>
             <el-select :model-value="a.abilityHrid" filterable clearable size="small" style="width: 220px" @update:model-value="v => setAbility(i, v)">
-              <el-option v-for="x in abilityOptions.filter(x => (i === 0) === x.isSpecial)" :key="x.hrid" :label="x.level ? `${x.name} Lv.${x.level}` : `${x.name}（未读到）`" :value="x.hrid" />
+              <el-option v-for="x in abilityOptions.filter(x => (i === 0) === x.isSpecial)" :key="x.hrid" :label="x.level ? `${x.name} Lv.${x.level}` : t('{name}（未读到）', { name: x.name })" :value="x.hrid" />
             </el-select>
             <el-input-number v-model="a.level" :min="1" :max="200" size="small" style="width: 90px" @change="setAbilityLevel(a)" />
-            <span v-if="(member.levels?.intelligence ?? 1) < (o.slotRequirements[i + 1] ?? 0)" class="bad">智力不足，未解锁</span>
+            <span v-if="(member.levels?.intelligence ?? 1) < (o.slotRequirements[i + 1] ?? 0)" class="bad">{{ t("智力不足，未解锁") }}</span>
           </div>
-          <div class="muted">已学技能 {{ learned.length }} 个（来自插件数据）。队友只能读到正在装备的技能，其他技能标“未读到”，选上后填等级即可。</div>
+          <div class="muted">{{ t("已学技能 {n} 个（来自插件数据）。队友只能读到正在装备的技能，其他技能标“未读到”，选上后填等级即可。", { n: learned.length }) }}</div>
         </el-tab-pane>
-        <el-tab-pane label="食物/饮料">
-          <div v-for="(kind, k) in [['food', '食物', o.food], ['drinks', '饮料', o.drinks]]" :key="k">
+        <el-tab-pane :label="t('食物/饮料')">
+          <div v-for="(kind, k) in [['food', t('食物'), o.food], ['drinks', t('饮料'), o.drinks]]" :key="k">
             <div v-for="i in 3" :key="i" class="row" style="margin-bottom: 6px">
               <span style="width: 60px" class="muted">{{ kind[1] }} {{ i }}</span>
               <el-select v-model="member[kind[0]][i - 1]" filterable clearable size="small" style="width: 240px" @change="dirty = true">
@@ -182,21 +183,21 @@ async function deleteLoadout(l) {
             </div>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="触发条件">
-          <div v-for="t in triggerTargets" :key="t.hrid" style="margin-bottom: 12px">
-            <b>{{ t.name }}</b>
-            <TriggerEditor v-model="t.model.value" />
+        <el-tab-pane :label="t('触发条件')">
+          <div v-for="tt in triggerTargets" :key="tt.hrid" style="margin-bottom: 12px">
+            <b>{{ tt.name }}</b>
+            <TriggerEditor v-model="tt.model.value" />
           </div>
         </el-tab-pane>
-        <el-tab-pane label="等级">
+        <el-tab-pane :label="t('等级#tab')">
           <div class="row">
             <div v-for="[k, label] in SKILLS" :key="k" class="row">
-              <span class="muted">{{ label }}</span>
+              <span class="muted">{{ t(label) }}</span>
               <el-input-number v-model="member.levels[k]" :min="1" :max="200" size="small" style="width: 90px" @change="dirty = true" />
             </div>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="房屋/神龛">
+        <el-tab-pane :label="t('房屋/神龛')">
           <div v-for="[title, rooms] in houseGroups" :key="title" style="margin-bottom: 12px">
             <div class="muted" style="margin-bottom: 6px">{{ title }}</div>
             <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))">
@@ -206,34 +207,34 @@ async function deleteLoadout(l) {
               </div>
             </div>
           </div>
-          <div class="muted" style="margin-bottom: 6px">公会神龛加成（个人等级）</div>
+          <div class="muted" style="margin-bottom: 6px">{{ t("公会神龛加成（个人等级）") }}</div>
           <div v-for="g in o.guildBuffs" :key="g.hrid" class="row" style="margin-bottom: 6px">
             <span style="width: 290px; white-space: nowrap">{{ g.shrine }} · {{ g.name }}</span>
             <el-input-number :model-value="Number(member.guildBuffs?.[g.hrid] || 0)" :min="0" :max="g.maxLevel" size="small" style="width: 90px" @change="v => setGuild(g.hrid, v)" />
-            <span v-if="shrineOf(g.hrid) != null" class="muted">公会神龛 {{ shrineOf(g.hrid) }} 级</span>
-            <span v-if="shrineOf(g.hrid) != null && Number(member.guildBuffs?.[g.hrid] || 0) > shrineOf(g.hrid)" class="bad">高于公会神龛等级，游戏里只按 {{ shrineOf(g.hrid) }} 级生效</span>
+            <span v-if="shrineOf(g.hrid) != null" class="muted">{{ t("公会神龛 {n} 级", { n: shrineOf(g.hrid) }) }}</span>
+            <span v-if="shrineOf(g.hrid) != null && Number(member.guildBuffs?.[g.hrid] || 0) > shrineOf(g.hrid)" class="bad">{{ t("高于公会神龛等级，游戏里只按 {n} 级生效", { n: shrineOf(g.hrid) }) }}</span>
           </div>
           <el-alert v-if="!member.guildBuffCaps" type="info" :closable="false" show-icon style="margin-top: 6px">
-            <template #title>队友的神龛加成取自队友的个人资料页；资料页看不到公会神龛等级，这里不做限制，按个人等级模拟。如果公会神龛比个人等级低，请手动改小。</template>
+            <template #title>{{ t("队友的神龛加成取自队友的个人资料页；资料页看不到公会神龛等级，这里不做限制，按个人等级模拟。如果公会神龛比个人等级低，请手动改小。") }}</template>
           </el-alert>
         </el-tab-pane>
       </el-tabs>
     </el-card>
 
     <el-card>
-      <template #header><b>配装方案</b> <span class="muted">保存/切换整队配置</span></template>
+      <template #header><b>{{ t("配装方案") }}</b> <span class="muted">{{ t("保存/切换整队配置") }}</span></template>
       <div class="row" style="margin-bottom: 8px">
-        <el-input v-model="loadoutName" placeholder="方案名称" size="small" style="width: 200px" />
-        <el-button size="small" @click="saveLoadout">保存当前为方案</el-button>
+        <el-input v-model="loadoutName" :placeholder="t('方案名称')" size="small" style="width: 200px" />
+        <el-button size="small" @click="saveLoadout">{{ t("保存当前为方案") }}</el-button>
       </div>
-      <el-table :data="store.loadouts" size="small" empty-text="暂无方案">
-        <el-table-column prop="name" label="名称" />
-        <el-table-column label="成员"><template #default="{ row }">{{ row.selected.map(id => row.members.find(m => String(m.id) === id)?.name).join("、") }}</template></el-table-column>
-        <el-table-column label="保存时间" width="180"><template #default="{ row }">{{ new Date(row.savedAt).toLocaleString() }}</template></el-table-column>
+      <el-table :data="store.loadouts" size="small" :empty-text="t('暂无方案')">
+        <el-table-column prop="name" :label="t('名称')" />
+        <el-table-column :label="t('成员')"><template #default="{ row }">{{ joinList(row.selected.map(id => row.members.find(m => String(m.id) === id)?.name)) }}</template></el-table-column>
+        <el-table-column :label="t('保存时间')" width="180"><template #default="{ row }">{{ dateTime(row.savedAt) }}</template></el-table-column>
         <el-table-column width="150">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="useLoadout(row)">载入</el-button>
-            <el-button size="small" text type="danger" @click="deleteLoadout(row)">删除</el-button>
+            <el-button size="small" text type="primary" @click="useLoadout(row)">{{ t("载入") }}</el-button>
+            <el-button size="small" text type="danger" @click="deleteLoadout(row)">{{ t("删除") }}</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -20,12 +20,14 @@ import { groups, memberPool, presets, presetVariants } from "./skill-pools.mjs"
 import { applyGroup } from "./opt-skills.mjs"
 import { GearPrices, pricedBook } from "./opt-upgrades.mjs"
 import { zh } from "./i18n.mjs"
+import { joinList, t, tk } from "./lang.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const INF = Number.POSITIVE_INFINITY
 const MAX_LEVEL = 1000
 const CONCURRENCY = 32
-const SLOT_ZH = { weapon: "武器", off_hand: "副手", head: "头部", body: "身体", legs: "腿部", hands: "手部", feet: "脚部", back: "背部", neck: "项链", earrings: "耳环", ring: "戒指", pouch: "袋子", charm: "护符", trinket: "饰品" }
+// t() keys: translate where shown
+const SLOT_ZH = { weapon: tk("武器"), off_hand: tk("副手"), head: tk("头部"), body: tk("身体"), legs: tk("腿部"), hands: tk("手部"), feet: tk("脚部"), back: tk("背部"), neck: tk("项链"), earrings: tk("耳环"), ring: tk("戒指"), pouch: tk("袋子"), charm: tk("护符"), trinket: tk("饰品") }
 const BUY_LEVELS = [0, 5, 8, 10, 12, 14]
 // progress estimates: rate() calls of one level search (doubling + binary), share of a pick's top
 // candidates that pass the screen and get one, candidate counts before a phase has been seen
@@ -211,7 +213,7 @@ function describeCfg(m, cfg) {
   const maps = m.$e
   const equipment = LAB_SLOTS.map(s => {
     const e = cfg.equipment?.[s]
-    return { slot: s, slotName: SLOT_ZH[s], itemHrid: e?.itemHrid || "", name: e?.itemHrid ? zh(maps, e.itemHrid) : "—", enhancementLevel: Number(e?.enhancementLevel || 0) }
+    return { slot: s, slotName: t(SLOT_ZH[s]), itemHrid: e?.itemHrid || "", name: e?.itemHrid ? zh(maps, e.itemHrid) : "—", enhancementLevel: Number(e?.enhancementLevel || 0) }
   })
   const abilities = (cfg.abilities || []).map(a => (a?.abilityHrid ? { hrid: a.abilityHrid, name: zh(maps, a.abilityHrid), level: a.level } : null))
   return { equipment, abilities }
@@ -228,7 +230,7 @@ async function optimizeGear(lab, cur, monster, owned, label) {
     if (slot === "weapon")
       for (const x of owned.off_hand) for (const c of cands.filter(c => !isTwoHand(maps, c.cfg.equipment.weapon.itemHrid) && !c.cfg.equipment.off_hand?.itemHrid))
         cands.push({ cfg: withItem(maps, c.cfg, "off_hand", x.h, x.n) })
-    lab.api.progress(0, cands.length, `${label} · 装备 ${SLOT_ZH[slot]}`)
+    lab.api.progress(0, cands.length, t("{label} · 装备 {slot}", { label, slot: t(SLOT_ZH[slot]) }))
     const { win } = await lab.pick(cur, cands, monster)
     if (win) {
       cur = { cfg: win.cfg, best: win.best }
@@ -241,9 +243,9 @@ async function optimizeGear(lab, cur, monster, owned, label) {
 /** Ability search: every group of the class pool with the checked trigger presets. */
 async function optimizeAbilities(lab, cur, monster, label) {
   const mp = memberPool(lab.m, cur.cfg)
-  const weapon = zh(lab.maps, cur.cfg.equipment?.weapon?.itemHrid) || "空"
+  const weapon = zh(lab.maps, cur.cfg.equipment?.weapon?.itemHrid) || t("空")
   if (!mp.cls) {
-    lab.api.log(`  ${label}：武器 ${weapon} 认不出职业，跳过技能`)
+    lab.api.log("  " + t("{label}：武器 {weapon} 认不出职业，跳过技能", { label, weapon }))
     return { cur, changed: false }
   }
   const poolH = mp.pool.filter(p => p.learned).map(p => p.hrid)
@@ -253,14 +255,14 @@ async function optimizeAbilities(lab, cur, monster, label) {
     for (const v of presetVariants(lab.m, g, true)) cands.push({ cfg: applyGroup([cur.cfg], 0, g, v, levels).members[0], g })
   const names = c => (c.g || []).map(h => zh(lab.maps, h)).join("/")
   if (!cands.length) {
-    lab.api.log(`  ${label}：${mp.className}已学技能 ${poolH.length} 个（${poolH.map(h => zh(lab.maps, h)).join("、") || "无"}），${mp.slots} 个技能格，没有可试的组合`)
+    lab.api.log("  " + t("{label}：{cls}已学技能 {n} 个（{list}），{slots} 个技能格，没有可试的组合", { label, cls: mp.className, n: poolH.length, list: joinList(poolH.map(h => zh(lab.maps, h))) || t("无"), slots: mp.slots }))
     return { cur, changed: false }
   }
   lab.seen.abilities = cands.length
-  lab.api.progress(0, cands.length, `${label} · 技能（${mp.className}，${cands.length} 个方案）`)
+  lab.api.progress(0, cands.length, t("{label} · 技能（{cls}，{n} 个方案）", { label, cls: mp.className, n: cands.length }))
   const r = await lab.pick(cur, cands, monster, 4)
-  const tops = r.top.map(c => `${names(c)}${c.best ? ` ${c.best.level} 级` : ""}`).join("；")
-  lab.api.log(`  ${label}：技能试了 ${r.tried} 个方案（${mp.className}，池 ${poolH.length} 个），现在 ${cur.best.level} 级；${tops ? `粗筛领先：${tops}` : "没有比现在更好的"}${r.win ? ` → 采用 ${names(r.win)}` : ""}`)
+  const tops = r.top.map(c => `${names(c)}${c.best ? " " + t("{n} 级", { n: c.best.level }) : ""}`).join(t("；"))
+  lab.api.log("  " + t("{label}：技能试了 {n} 个方案（{cls}，池 {pool} 个），现在 {level} 级；", { label, n: r.tried, cls: mp.className, pool: poolH.length, level: cur.best.level }) + (tops ? t("粗筛领先：{tops}", { tops }) : t("没有比现在更好的")) + (r.win ? t(" → 采用 {names}", { names: names(r.win) }) : ""))
   return r.win ? { cur: { cfg: r.win.cfg, best: r.win.best }, changed: true } : { cur, changed: false }
 }
 
@@ -296,12 +298,12 @@ async function swapAbilities(lab, cur, monster, label) {
         for (const ps of presets(lab.m, h).filter(p => p.checked)) cands.push({ cfg: withAbility(cur.cfg, i, h, Number(l), ps), i, h })
       }
     if (!cands.length) break
-    lab.api.progress(0, cands.length, `${label} · 逐格换技能（${cands.length} 个方案）`)
+    lab.api.progress(0, cands.length, t("{label} · 逐格换技能（{n} 个方案）", { label, n: cands.length }))
     lab.seen.swaps = cands.length
     const r = await lab.pick(cur, cands, monster, 4)
     if (!r.win) break
     const was = cur.cfg.abilities?.[r.win.i]?.abilityHrid
-    lab.api.log(`  ${label}：技能格 ${r.win.i + 1} ${was ? zh(maps, was) : "空"} → ${zh(maps, r.win.h)}，${cur.best.level} → ${r.win.best.level} 级`)
+    lab.api.log("  " + t("{label}：技能格 {i} {was} → {now}，{from} → {to} 级", { label, i: r.win.i + 1, was: was ? zh(maps, was) : t("空"), now: zh(maps, r.win.h), from: cur.best.level, to: r.win.best.level }))
     cur = { cfg: r.win.cfg, best: r.win.best }
     changed = true
   }
@@ -355,12 +357,12 @@ async function purchases(lab, cur, monster, gp, owned, label, maxSpend) {
       const c = clone(cur.cfg)
       c.abilities[i] = { ...c.abilities[i], level: to }
       c.abilityLevelMap = { ...(c.abilityLevelMap || {}), [a.abilityHrid]: to }
-      cands.push({ cfg: c, slot: `ability${i}`, slotName: `技能 ${i + 1}`, h: a.abilityHrid, n: to, from, cost, how: `${n} 本${zh(maps, b.item)}`, label: `${zh(maps, a.abilityHrid)} Lv.${from} → ${to}` })
+      cands.push({ cfg: c, slot: `ability${i}`, slotName: t("技能 {i}", { i: i + 1 }), h: a.abilityHrid, n: to, from, cost, how: t("{n} 本{book}", { n, book: zh(maps, b.item) }), label: `${zh(maps, a.abilityHrid)} Lv.${from} → ${to}` })
     }
   })
   lab.seen.buys = cands.length
   if (!cands.length) return []
-  lab.api.progress(0, cands.length, `${label} · 可买装备和技能书（${cands.length} 个）`)
+  lab.api.progress(0, cands.length, t("{label} · 可买装备和技能书（{n} 个）", { label, n: cands.length }))
   const base = await lab.screen(cur.cfg, monster, cur.best.level)
   let done = 0
   const scored = await pool(cands, CONCURRENCY, async c => {
@@ -379,7 +381,7 @@ async function purchases(lab, cur, monster, gp, owned, label, maxSpend) {
   for (const c of [...bySlot.values()].flat()) {
     const best = await lab.maxLevel(c.cfg, monster, cur.best.level)
     if (best.level <= cur.best.level) continue
-    out.push({ slot: c.slot, slotName: c.slotName || SLOT_ZH[c.slot], itemHrid: c.h, name: zh(maps, c.h), enhancementLevel: c.n, label: c.label || `${zh(maps, c.h)} +${c.n}`, kind: c.label ? "book" : "gear", cost: c.cost, how: c.how, level: best.level, gain: best.level - cur.best.level, p: best.p })
+    out.push({ slot: c.slot, slotName: c.slotName || t(SLOT_ZH[c.slot]), itemHrid: c.h, name: zh(maps, c.h), enhancementLevel: c.n, label: c.label || `${zh(maps, c.h)} +${c.n}`, kind: c.label ? "book" : "gear", cost: c.cost, how: c.how, level: best.level, gain: best.level - cur.best.level, p: best.p })
   }
   // keep the cost / gain frontier: drop anything a cheaper option matches or beats
   out.sort((a, b) => a.cost - b.cost || b.gain - a.gain)
@@ -438,11 +440,11 @@ export async function optimizeLabyrinth(ev, params, api) {
   const monsters = params.monsters?.length ? params.monsters.filter(h => all.includes(h)) : all
   const combatLevel = Number(params.combatLevel) || Number(game?.combatLevel) || Math.floor(combatLevelOf(member.levels || {}))
   const effective = Math.floor(combatLevel + crateLevelBonus(maps, crates))
-  if (!game) api.log("没有读到迷宫设置（请更新油猴脚本到 0.4.6 后在游戏里重新同步），按当前身上的配装算")
-  if (!member.ownedEquipment) api.log("没有读到背包，只在配装里的装备中选")
-  api.log(`${member.name || "角色"}：战斗等级 ${combatLevel}，补给箱 ${crates.map(h => zh(maps, h)).join("、") || "无"}，有效等级 ${effective}；通关率阈值 ${(lab.threshold * 100).toFixed(0)}%`)
+  if (!game) api.log(t("没有读到迷宫设置（请更新油猴脚本到 0.4.6 后在游戏里重新同步），按当前身上的配装算"))
+  if (!member.ownedEquipment) api.log(t("没有读到背包，只在配装里的装备中选"))
+  api.log(t("{name}：战斗等级 {lv}，补给箱 {crates}，有效等级 {eff}；通关率阈值 {thr}%", { name: member.name || t("角色"), lv: combatLevel, crates: joinList(crates.map(h => zh(maps, h))) || t("无"), eff: effective, thr: (lab.threshold * 100).toFixed(0) }))
   const lu = member.labyrinthUpgrades
-  api.log(lu ? `迷宫升级：攻速 ${lu.attackSpeed} · 施法 ${lu.castSpeed} · 伤害 ${lu.combatDamage} · 暴击 ${lu.criticalRate}` : "没有读到迷宫升级，按 0 级算")
+  api.log(lu ? t("迷宫升级：攻速 {a} · 施法 {c} · 伤害 {d} · 暴击 {r}", { a: lu.attackSpeed, c: lu.castSpeed, d: lu.combatDamage, r: lu.criticalRate }) : t("没有读到迷宫升级，按 0 级算"))
   const gp = params.buy === false ? null : new GearPrices(maps, pricedBook(ev.ctx.book, params), Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04)
   const maxSpend = Number(params.maxSpend) > 0 ? Number(params.maxSpend) : INF
   // setting = room level - effective level + 1
@@ -477,7 +479,7 @@ export async function optimizeLabyrinth(ev, params, api) {
     const owned = ownedBySlot(maps, base)
     plan = phases(owned)
     ahead(0)
-    api.progress(0, 1, `${label} · 现在的配装`)
+    api.progress(0, 1, t("{label} · 现在的配装", { label }))
     const current = await lab.maxLevel(base, monster, hint)
     let cur = { cfg: base, best: current }
     for (let round = 0; round < 2; round++) {
@@ -510,11 +512,11 @@ export async function optimizeLabyrinth(ev, params, api) {
       purchases: buys.slice(0, 8).map(b => ({ ...b, setting: setting(b.level) })),
     }
     results.push(r)
-    api.log(`${name}（${r.loadoutName || "无配装"}）：现在设置 ${gameSetting == null ? "未设" : signed(gameSetting)}；现在的配装推荐 ${signed(r.current.setting)}，换装换技能后推荐 ${signed(r.best.setting)}${buys[0] ? `；买 ${buys[0].label} 可到 ${signed(setting(buys[0].level))}` : ""}`)
+    api.log(t("{name}（{loadout}）：现在设置 {now}；现在的配装推荐 {cur}，换装换技能后推荐 {best}", { name, loadout: r.loadoutName || t("无配装"), now: gameSetting == null ? t("未设") : signed(gameSetting), cur: signed(r.current.setting), best: signed(r.best.setting) }) + (buys[0] ? t("；买 {item} 可到 {to}", { item: buys[0].label, to: signed(setting(buys[0].level)) }) : ""))
     api.partial({ results, threshold: lab.threshold, effective, combatLevel })
     spent.push(ev.simHours - start)
     ahead(plan.length)
   }
-  api.log(`完成，共模拟 ${ev.sims} 次`)
+  api.log(t("完成，共模拟 {n} 次", { n: ev.sims }))
   return { results, threshold: lab.threshold, memberName: member.name, effective, combatLevel, crates }
 }

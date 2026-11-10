@@ -5,10 +5,13 @@
 import { confirmAdaptive, confirmWork, halving, halvingWork, nestedApi, DEFAULT_STAGES } from "./search.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
+import { getLang, SEP, t } from "./lang.mjs"
 import { optimizeConsumables } from "./opt-consumables.mjs"
 import { groups, memberPool, presetVariants, triggerKey } from "./skill-pools.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
+const COMMA = () => (getLang() === "en" ? ", " : "，") // i18n-ok
+const memberName = (cfg, i) => cfg?.name || t("队员{n}", { n: i + 1 })
 const strip = c => ({ dependencyHrid: c.dependencyHrid, conditionHrid: c.conditionHrid, comparatorHrid: c.comparatorHrid, value: Number(c.value || 0) })
 
 const GRID = {
@@ -45,8 +48,8 @@ function configKey(m, cfg) {
   return JSON.stringify((cfg.abilities || []).slice(1).map(a => {
     const h = a?.abilityHrid
     if (!h) return null
-    const t = Object.prototype.hasOwnProperty.call(cfg.triggerMap || {}, h) ? cfg.triggerMap[h] : m.$e.abilityDetailMap[h]?.defaultCombatTriggers || []
-    return [h, a.level, triggerKey(t)]
+    const trig = Object.prototype.hasOwnProperty.call(cfg.triggerMap || {}, h) ? cfg.triggerMap[h] : m.$e.abilityDetailMap[h]?.defaultCombatTriggers || []
+    return [h, a.level, triggerKey(trig)]
   }))
 }
 
@@ -106,7 +109,7 @@ function memberCands(m, members, idx, params) {
   const added = Object.fromEntries(Object.entries(params.add?.[idx] || {}).filter(([h, l]) => mp.pool.some(p => p.hrid === h) && Number(l) > 0).map(([h, l]) => [h, Math.floor(Number(l))]))
   const pool = mp.pool.filter(p => (p.learned || added[p.hrid]) && !excluded.has(p.hrid)).map(p => p.hrid)
   const levels = { ...Object.fromEntries(mp.pool.map(p => [p.hrid, p.level])), ...added }
-  const cands = [{ key: "当前", members: clone(members), incumbent: true, search: [] }]
+  const cands = [{ key: "current", members: clone(members), incumbent: true, search: [] }]
   const seen = new Set([configKey(m, cfg)])
   for (const g of groups(pool, mp.slots, mp.cls))
     for (const v of presetVariants(m, g, !params.allPresets)) {
@@ -153,7 +156,7 @@ export async function optimizeSkills(ev, params, api) {
   const options = {} // member index -> its best configurations of the latest round, for the team cross check
   // HP thresholds follow the target's monsters (a full wave / a single monster at this tier), not old values
   const scale = zoneHpScale(m, target)
-  if (scale) api.log(`怪物血量（阈值按这个搜）：单只约 ${Math.round(scale.single)}，一波约 ${Math.round(scale.wave)}${scale.boss ? `，Boss ${scale.boss}` : ""}`)
+  if (scale) api.log(t("怪物血量（阈值按这个搜）：单只约 {single}，一波约 {wave}", { single: Math.round(scale.single), wave: Math.round(scale.wave) }) + (scale.boss ? t("，Boss {boss}", { boss: scale.boss }) : ""))
   const common = { target, extra, objective, signal: api.signal }
   // 24 h x 32 runs, paired: with 8 runs the noise (deaths come in chains) often hid real gains
   const finalSeeds = seedList(99173, 32)
@@ -172,27 +175,27 @@ export async function optimizeSkills(ev, params, api) {
   const left = (round, i, cur) => cur + sumFull(optimize.slice(i + 1)) + (rounds - round) * sumFull(optimize) + tail()
   report(FINAL + left(1, -1, 0))
   const baseline = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
-  api.log(`基准：${fmt(baseline.value, objective)}`)
+  api.log(t("基准：{v}", { v: fmt(baseline.value, objective) }))
 
   for (let round = 1; round <= rounds; round++) {
     let changed = false
     for (const [i, idx] of optimize.entries()) {
       const cfg = members[idx]
-      const who = cfg.name || `队员${idx + 1}`
+      const who = memberName(cfg, idx)
       const { mp, pool, cands } = memberCands(m, members, idx, params)
       if (!cands) {
-        api.log(`${who}：没识别出职业（武器 ${zh(m.$e, cfg.equipment?.weapon?.itemHrid) || "空"}），跳过`)
+        api.log(t("{who}：没识别出职业（武器 {weapon}），跳过", { who, weapon: zh(m.$e, cfg.equipment?.weapon?.itemHrid) || t("空") }))
         report(left(round, i, 0))
         continue
       }
       const confirm2 = confirmWork(stages, 2)
       report(left(round, i, halvingWork(cands.length, stages) + tuneWork(PICK_ITEMS, stages) + est[idx].improve + confirm2))
-      api.log(`第 ${round} 轮 · ${who}（${mp.className}，${mp.slots} 个技能格，池 ${pool.length} 个）：${cands.length - 1} 个方案`)
+      api.log(t("第 {round} 轮 · {who}（{cls}，{slots} 个技能格，池 {pool} 个）：{n} 个方案", { round, who, cls: mp.className, slots: mp.slots, pool: pool.length, n: cands.length - 1 }))
       let ranked = await halving(ev, cands, {
         ...common,
         stages,
         seedBase: 1000 * round + idx,
-        onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${who} · 阶段 ${s + 1}/${stages.length}`),
+        onStage: (s, d, tot) => api.progress(d, tot, t("第 {round} 轮 · {who} · 阶段 {s}/{n}", { round, who, s: s + 1, n: stages.length })),
       })
       // challenger = the candidate most likely better than the current one (highest lower bound of the paired
       // difference), not just the highest mean: with deaths in the mix the top mean is often the noisiest one
@@ -214,27 +217,27 @@ export async function optimizeSkills(ev, params, api) {
       // 2) the current abilities and trigger conditions, improved step by step: add / remove one condition at a
       //    time, then tune every numeric threshold
       {
-        const t = await improveCurrent(tuneCtx, cur, round, r => report(left(round, i, r + confirm2)))
-        if (t.changes.length) challengers.push({ ...t.best, key: "tuned", incumbent: false, tuned: t.changes, presets: groupLabels(t.changes) })
+        const imp = await improveCurrent(tuneCtx, cur, round, r => report(left(round, i, r + confirm2)))
+        if (imp.changes.length) challengers.push({ ...imp.best, key: "tuned", incumbent: false, tuned: imp.changes, presets: groupLabels(imp.changes) })
       }
       report(left(round, i, challengers.length ? confirmWork(stages, challengers.length) : 0))
       // confirm against the current configuration on fresh seeds: the challengers were picked as the best of many
       // on the search seeds, so those numbers flatter them
       let best = cur
       if (challengers.length) {
-        const confirmed = (await confirmAdaptive(ev, common, stages, cur, challengers, { seedBase: 8000 + 100 * round + idx, label: `${who} · 复核`, api }))
+        const confirmed = (await confirmAdaptive(ev, common, stages, cur, challengers, { seedBase: 8000 + 100 * round + idx, label: t("{who} · 复核", { who }), api }))
           .sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)
         best = confirmed[0]
         ranked = [...confirmed, ...ranked.filter(r => r.key !== pick?.key)]
       }
-      options[idx] = ranked.slice(0, 6).map(r => ({ cfg: r.members[idx], label: r.tuned ? `当前技能，触发改为 ${r.tuned.map(c => c.label).join("，")}` : names(m, r.members[idx]).join(" / ") }))
+      options[idx] = ranked.slice(0, 6).map(r => ({ cfg: r.members[idx], label: r.tuned ? t("当前技能，触发改为 {list}", { list: r.tuned.map(c => c.label).join(COMMA()) }) : names(m, r.members[idx]).join(" / ") }))
       history.push({ round, member: idx, top: ranked.slice(0, 5).map(r => ({ abilities: names(m, r.members[idx]), presets: r.presets, value: r.value, deaths: r.mean.deathsPerHour, vs: r.vsIncumbent, confirmed: r.confirmed, tuned: r.tuned?.map(c => c.label) })) })
       if (best.confirmed && best.vsIncumbent?.clearlyBetter) {
         members = best.members
         chosen[idx] = best.presets
         changed = true
-        api.log(`  → 采用 ${best.tuned ? `当前技能，触发改为 ${best.tuned.map(c => c.label).join("，")}` : names(m, members[idx]).join(" / ")}（+${fmt(best.vsIncumbent.mean, objective)}）`)
-      } else api.log(best.confirmed ? `  → 当前配置已是最好（最有希望的 ${best.tuned ? `当前触发改进 ${best.tuned.map(c => c.label).join("，")}` : names(m, best.members[idx]).join(" / ")} 复核 ${best.vsIncumbent.mean >= 0 ? "+" : ""}${fmt(best.vsIncumbent.mean, objective)} ± ${fmt(1.96 * best.vsIncumbent.se, objective)}，不显著）` : "  → 当前配置已是最好")
+        api.log(t("  → 采用 {what}（+{gain}）", { what: best.tuned ? t("当前技能，触发改为 {list}", { list: best.tuned.map(c => c.label).join(COMMA()) }) : names(m, members[idx]).join(" / "), gain: fmt(best.vsIncumbent.mean, objective) }))
+      } else api.log(best.confirmed ? t("  → 当前配置已是最好（最有希望的 {what} 复核 {gain} ± {se}，不显著）", { what: best.tuned ? t("当前触发改进 {list}", { list: best.tuned.map(c => c.label).join(COMMA()) }) : names(m, best.members[idx]).join(" / "), gain: (best.vsIncumbent.mean >= 0 ? "+" : "") + fmt(best.vsIncumbent.mean, objective), se: fmt(1.96 * best.vsIncumbent.se, objective) }) : t("  → 当前配置已是最好"))
       api.partial({ members, history, baseline: baseline.mean, objective })
       estimate(idx) // from its new configuration, for the next round
       report(left(round, i, 0))
@@ -249,7 +252,7 @@ export async function optimizeSkills(ev, params, api) {
     const key = c => configKey(m, c)
     const lists = optimize.map(idx => {
       const seen = new Set()
-      return [{ cfg: members[idx], label: "当前" }, ...(options[idx] || [])].filter(o => !seen.has(key(o.cfg)) && seen.add(key(o.cfg))).slice(0, 3)
+      return [{ cfg: members[idx], label: t("当前"), current: true }, ...(options[idx] || [])].filter(o => !seen.has(key(o.cfg)) && seen.add(key(o.cfg))).slice(0, 3)
     })
     if (lists.some(l => l.length > 1)) {
       const product = lists.reduce((acc, l) => acc.flatMap(a => l.map(o => [...a, o])), [[]])
@@ -259,21 +262,21 @@ export async function optimizeSkills(ev, params, api) {
         return { key: `x${k}`, members: mem, combo, incumbent: k === 0 }
       })
       report(halvingWork(cands.length, stages) + confirmWork(stages, 1) + afterCross())
-      api.log(`全队交叉组合：每人前 ${Math.max(...lists.map(l => l.length))} 名方案互相组合，共 ${cands.length} 种`)
-      let ranked = await halving(ev, cands, { ...common, stages, seedBase: 6000, onStage: (s, d, t) => api.progress(d, t, `全队交叉组合 · 阶段 ${s + 1}/${stages.length}`) })
+      api.log(t("全队交叉组合：每人前 {top} 名方案互相组合，共 {n} 种", { top: Math.max(...lists.map(l => l.length)), n: cands.length }))
+      let ranked = await halving(ev, cands, { ...common, stages, seedBase: 6000, onStage: (s, d, tot) => api.progress(d, tot, t("全队交叉组合 · 阶段 {s}/{n}", { s: s + 1, n: stages.length })) })
       const cur = ranked.find(r => r.incumbent)
       const pick = ranked.filter(r => !r.incumbent).sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)[0]
-      const comboText = r => r.combo.map((o, j) => `${members[optimize[j]].name || `队员${optimize[j] + 1}`}：${o.label}`)
+      const comboText = r => r.combo.map((o, j) => t("{who}：{what}", { who: memberName(members[optimize[j]], optimize[j]), what: o.label }))
       if (pick) {
-        const [best] = await confirmAdaptive(ev, common, stages, cur, [{ ...pick, key: "best" }], { seedBase: 6500, label: "全队交叉组合 · 复核", api })
+        const [best] = await confirmAdaptive(ev, common, stages, cur, [{ ...pick, key: "best" }], { seedBase: 6500, label: t("全队交叉组合 · 复核"), api })
         ranked = [best, ...ranked.filter(r => r.key !== pick.key)]
-        history.push({ title: "全队交叉组合", team: true, top: ranked.slice(0, 5).map(r => ({ abilities: comboText(r), value: r.value, deaths: r.mean.deathsPerHour, vs: r.vsIncumbent, confirmed: r.confirmed })) })
-        const changedNames = best.combo.map((o, j) => (o.label === "当前" ? null : optimize[j])).filter(x => x != null)
+        history.push({ title: t("全队交叉组合"), team: true, top: ranked.slice(0, 5).map(r => ({ abilities: comboText(r), value: r.value, deaths: r.mean.deathsPerHour, vs: r.vsIncumbent, confirmed: r.confirmed })) })
+        const changedNames = best.combo.map((o, j) => (o.current ? null : optimize[j])).filter(x => x != null)
         if (best.vsIncumbent.clearlyBetter) {
           members = best.members
           for (const idx of changedNames) chosen[idx] ||= {}
-          api.log(`  → 采用 ${comboText(best).filter((_, j) => best.combo[j].label !== "当前").join("；")}（+${fmt(best.vsIncumbent.mean, objective)}）`)
-        } else api.log(`  → 不换（最有希望的 ${comboText(best).join("；")} 复核 ${best.vsIncumbent.mean >= 0 ? "+" : ""}${fmt(best.vsIncumbent.mean, objective)} ± ${fmt(1.96 * best.vsIncumbent.se, objective)}，不显著）`)
+          api.log(t("  → 采用 {what}（+{gain}）", { what: comboText(best).filter((_, j) => !best.combo[j].current).join(SEP()), gain: fmt(best.vsIncumbent.mean, objective) }))
+        } else api.log(t("  → 不换（最有希望的 {what} 复核 {gain} ± {se}，不显著）", { what: comboText(best).join(SEP()), gain: (best.vsIncumbent.mean >= 0 ? "+" : "") + fmt(best.vsIncumbent.mean, objective), se: fmt(1.96 * best.vsIncumbent.se, objective) }))
         api.partial({ members, history, baseline: baseline.mean, objective })
       }
     }
@@ -284,7 +287,7 @@ export async function optimizeSkills(ev, params, api) {
   // food / drink triggers on top of the new skills (mana use and pacing changed with them)
   let consumableChanges = []
   if (params.consumables) {
-    api.log("接着优化药水触发")
+    api.log(t("接着优化药水触发"))
     const cr = await optimizeConsumables(ev, { target, extra, objective, members, optimize }, nestedApi(api, FINAL, { partial: () => {} }))
     if (!cr.unchanged) {
       members = cr.members
@@ -297,11 +300,11 @@ export async function optimizeSkills(ev, params, api) {
   const cmp = paired(final.perSeed, baseline.perSeed)
   // every change was confirmed on its own; the team check is reported, not used to throw them away
   if (!Object.keys(chosen).length && !consumableChanges.length) {
-    api.log("当前技能配置已是最好")
+    api.log(t("当前技能配置已是最好"))
     return { members: clone(params.members), history, chosen: {}, baseline: baseline.mean, final: baseline.mean, improvement: { mean: 0, se: 0, low: 0, high: 0 }, objective, unchanged: true }
   }
   restoreDefaults(m, members, params.members)
-  api.log(`完成：${fmt(final.value, objective)}（基准 ${fmt(baseline.value, objective)}，提升 ${fmt(cmp.mean, objective)} ± ${fmt(1.96 * cmp.se, objective)}）`)
+  api.log(t("完成：{v}（基准 {base}，提升 {gain} ± {se}）", { v: fmt(final.value, objective), base: fmt(baseline.value, objective), gain: fmt(cmp.mean, objective), se: fmt(1.96 * cmp.se, objective) }))
   return { members, history, chosen, consumableChanges, baseline: baseline.mean, final: final.mean, improvement: cmp, objective }
 }
 
@@ -345,13 +348,13 @@ async function tune({ ev, common, stages, idx, who, api, m }, start, items, onLe
       cs.push({ ...best, key: `${v}`, members: mem, incumbent: false })
     }
     if (cs.length === 1) return
-    api.progress(0, cs.length, `${who} · ${zh(m.$e, it.hrid)} 阈值${label}`)
+    api.progress(0, cs.length, t("{who} · {ability} 阈值{label}", { who, ability: zh(m.$e, it.hrid), label }))
     const r = await halving(ev, cs, { ...common, stages: stages.length > 1 ? stages.slice(1) : stages, seedBase: 7000 + idx })
     if (!r[0].incumbent && r[0].vsIncumbent.mean > 0) best = { ...r[0], incumbent: false }
   }
   for (const [k, it] of items.entries()) {
-    await tryValues(it, it.coarse, "粗搜")
-    await tryValues(it, it.fine(at(best, it).value), "细搜")
+    await tryValues(it, it.coarse, t("粗搜"))
+    await tryValues(it, it.fine(at(best, it).value), t("细搜"))
     onLeft?.(tuneWork(items.length - k - 1, stages))
   }
   const changes = items.map(it => ({ hrid: it.hrid, index: it.index, from: at(start, it).value, to: at(best, it).value }))
@@ -366,7 +369,7 @@ const DEP = e => `/combat_trigger_dependencies/${e}`
 const CND = e => `/combat_trigger_conditions/${e}`
 const CMP = e => `/combat_trigger_comparators/${e}`
 const cnd = (dep, c, cmp, value = 0) => ({ dependencyHrid: DEP(dep), conditionHrid: CND(c), comparatorHrid: CMP(cmp), value })
-const CMP_TEXT = { greater_than_equal: "≥", less_than_equal: "≤", is_active: "生效", is_inactive: "未生效" }
+const CMP_TEXT = { greater_than_equal: () => "≥", less_than_equal: () => "≤", is_active: () => t("生效"), is_inactive: () => t("未生效") }
 
 /** Conditions tried as additions to an ability's trigger (coarse values; the thresholds are tuned afterwards). */
 function conditionLibrary(m, hrid, selfBuff, scale) {
@@ -385,9 +388,10 @@ function conditionLibrary(m, hrid, selfBuff, scale) {
 }
 
 function condText(m, c) {
-  const n = h => { const t = zh(m.$e, h); return t === h ? h.split("/").at(-1) : t }
+  const n = h => { const s = zh(m.$e, h); return s === h ? h.split("/").at(-1) : s }
+  const sp = getLang() === "en" ? " " : ""
   const cmp = c.comparatorHrid.split("/").at(-1)
-  return `${n(c.dependencyHrid)}${n(c.conditionHrid)}${CMP_TEXT[cmp] || n(c.comparatorHrid)}${["is_active", "is_inactive"].includes(cmp) ? "" : Number(c.value || 0)}`
+  return [n(c.dependencyHrid), n(c.conditionHrid), CMP_TEXT[cmp]?.() || n(c.comparatorHrid), ["is_active", "is_inactive"].includes(cmp) ? "" : Number(c.value || 0)].filter(x => x !== "").join(sp)
 }
 const sameKind = (a, b) => a.dependencyHrid === b.dependencyHrid && a.conditionHrid === b.conditionHrid && a.comparatorHrid === b.comparatorHrid
 
@@ -414,7 +418,7 @@ function neighbors(m, members, idx, scale) {
     if (!a || !b) continue
     const mem = clone(members)
     ;[mem[idx].abilities[k], mem[idx].abilities[k + 1]] = [mem[idx].abilities[k + 1], mem[idx].abilities[k]]
-    out.push({ members: mem, hrid: a, label: `交换「${zh(m.$e, a)}」和「${zh(m.$e, b)}」的顺序` })
+    out.push({ members: mem, hrid: a, label: t("交换「{a}」和「{b}」的顺序", { a: zh(m.$e, a), b: zh(m.$e, b) }) })
   }
   for (const a of slots.slice(1)) {
     const h = a?.abilityHrid
@@ -424,7 +428,7 @@ function neighbors(m, members, idx, scale) {
     conds.forEach((c, i) => {
       const mem = clone(members)
       mem[idx].triggerMap[h].splice(i, 1)
-      out.push({ members: mem, hrid: h, label: `${name} 去掉「${condText(m, c)}」` })
+      out.push({ members: mem, hrid: h, label: t("{name} 去掉「{cond}」", { name, cond: condText(m, c) }) })
     })
     if (conds.length >= 4) continue
     const selfBuff = conds.some(c => c.dependencyHrid === DEP("self") && c.conditionHrid === CND(h.split("/").at(-1)))
@@ -432,7 +436,7 @@ function neighbors(m, members, idx, scale) {
       if (conds.some(x => sameKind(x, c))) continue
       const mem = clone(members)
       mem[idx].triggerMap[h] = [...conds.map(strip), strip(c)]
-      out.push({ members: mem, hrid: h, label: `${name} 加上「${condText(m, c)}」`, add: { hrid: h, cond: strip(c) } })
+      out.push({ members: mem, hrid: h, label: t("{name} 加上「{cond}」", { name, cond: condText(m, c) }), add: { hrid: h, cond: strip(c) } })
     }
   }
   return out
@@ -449,7 +453,7 @@ function pairNeighbors(members, idx, adds) {
       if (a.hrid === b.hrid && (sameKind(a.cond, b.cond) || (tm[a.hrid] || []).length + 2 > 4)) continue
       tm[a.hrid] = [...(tm[a.hrid] || []), a.cond]
       tm[b.hrid] = [...(tm[b.hrid] || []), b.cond]
-      out.push({ members: mem, hrid: a.hrid, label: `${adds[i].label}，同时${adds[j].label}`, pair: [adds[i], adds[j]] })
+      out.push({ members: mem, hrid: a.hrid, label: t("{a}，同时{b}", { a: adds[i].label, b: adds[j].label }), pair: [adds[i], adds[j]] })
     }
   return out
 }
@@ -469,7 +473,7 @@ async function improveCurrent(ctx, cur, round, onLeft) {
     const r = await halving(ev, cands, {
       ...common, stages, seedBase: 9000 + 100 * round + 10 * idx + step,
       onScored: (s, sc) => { if (s === 0) first = sc },
-      onStage: (s, d, t) => api.progress(d, t, `${who} · 触发条件搜索第 ${step} 步（${nb.length} 个改法）· 阶段 ${s + 1}/${stages.length}`),
+      onStage: (s, d, tot) => api.progress(d, tot, t("{who} · 触发条件搜索第 {step} 步（{n} 个改法）· 阶段 {s}/{ns}", { who, step, n: nb.length, s: s + 1, ns: stages.length })),
     })
     let top = r.filter(x => !x.incumbent).sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)[0]
     // no single change clearly better: pairs of the additions that did best alone in the first stage
@@ -478,13 +482,13 @@ async function improveCurrent(ctx, cur, round, onLeft) {
     if (pairs.length) {
       const r2 = await halving(ev, [{ ...state, key: "state", incumbent: true }, ...pairs.map((n, k) => ({ ...state, key: `p${k}`, members: n.members, change: n, incumbent: false }))], {
         ...common, stages, seedBase: 9500 + 100 * round + 10 * idx + step,
-        onStage: (s, d, t) => api.progress(d, t, `${who} · 触发条件搜索第 ${step} 步（${pairs.length} 种两条组合）· 阶段 ${s + 1}/${stages.length}`),
+        onStage: (s, d, tot) => api.progress(d, tot, t("{who} · 触发条件搜索第 {step} 步（{n} 种两条组合）· 阶段 {s}/{ns}", { who, step, n: pairs.length, s: s + 1, ns: stages.length })),
       })
       const topPair = r2.filter(x => !x.incumbent).sort((a, b) => b.vsIncumbent.low - a.vsIncumbent.low)[0]
       if (topPair && (!top || topPair.vsIncumbent.low > top.vsIncumbent.low)) top = topPair
     }
     if (!top || !(top.vsIncumbent.low > 0)) break
-    api.log(`  ${who} 触发条件第 ${step} 步：${top.change.label}（搜索时 +${fmt(top.vsIncumbent.mean, common.objective)}）`)
+    api.log(t("  {who} 触发条件第 {step} 步：{what}（搜索时 +{gain}）", { who, step, what: top.change.label, gain: fmt(top.vsIncumbent.mean, common.objective) }))
     for (const c of top.change.pair || [top.change]) changes.push({ hrid: c.hrid, label: c.label })
     state = { ...top, incumbent: false }
     // assume one more step (up to 3), then the thresholds
@@ -492,14 +496,14 @@ async function improveCurrent(ctx, cur, round, onLeft) {
   }
   const items = currentItems(m, state.members[idx], ctx.scale)
   onLeft?.(tuneWork(items.length, stages))
-  const t = await tune(ctx, state, items, onLeft)
-  return { best: t.best, changes: [...changes, ...t.changes] }
+  const tuned = await tune(ctx, state, items, onLeft)
+  return { best: tuned.best, changes: [...changes, ...tuned.changes] }
 }
 
 /** { abilityHrid: "change; change" } for the history table. */
 function groupLabels(changes) {
   const out = {}
-  for (const c of changes) out[c.hrid] = out[c.hrid] ? `${out[c.hrid]}；${c.label}` : c.label
+  for (const c of changes) out[c.hrid] = out[c.hrid] ? `${out[c.hrid]}${SEP()}${c.label}` : c.label
   return out
 }
 
@@ -516,6 +520,6 @@ function restoreDefaults(m, members, original) {
 
 function fmt(v, objective) {
   if (OBJECTIVE_FORMATS[objective]) return OBJECTIVE_FORMATS[objective](v)
-  if (objective === "xp") return `${Math.round(v).toLocaleString()} 经验/小时`
-  return `${(v * 24 / 1e6).toFixed(2)}M/天`
+  if (objective === "xp") return t("{v} 经验/小时", { v: Math.round(v).toLocaleString() })
+  return t("{v}M/天", { v: (v * 24 / 1e6).toFixed(2) })
 }

@@ -1,8 +1,10 @@
 // ==UserScript==
 // @name         MWI 战斗工具 · 铁牛导入
+// @name:en      MWI Combat Tools · Ironcow import
 // @namespace    mwi-fastsim-ironcow
-// @version      0.1.1
+// @version      0.1.2
 // @description  游戏页面：读取当前铁牛角色（战斗配置 + 生活技能、工具装备、茶、房子、社区加成），导入到 MWI 战斗工具的「铁牛模式」，和普通队伍分开保存
+// @description:en Game page: reads the current ironcow character (combat setup + gathering/production skills, tools, teas, houses, community buffs) into the Ironcow mode of MWI Combat Tools, kept apart from the normal team
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
 // @match        https://milkywayidle.com/*
@@ -27,6 +29,16 @@
   const SERVER = "http://127.0.0.1:8765"
   const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window
   const isGame = /milkywayidle(cn)?\.com$/.test(location.hostname)
+  // UI text in the game's language (the tool page: its own setting): Chinese unless it is English
+  const zhUI = () => {
+    try {
+      const l = W.localStorage.getItem("i18nextLng") || W.localStorage.getItem("fastsim-lang") || document.documentElement.lang || navigator.language || ""
+      return !/^en/i.test(l)
+    } catch {
+      return true
+    }
+  }
+  const L = (zh, en) => (zhUI() ? zh : en)
   // captured characters by name (several ironcow accounts can be kept) and the latest game data
   const CAPTURES = "fastsim_ironcow_captures_v1"
   const CLIENT_DATA = "fastsim_ironcow_client_data_v1"
@@ -77,8 +89,8 @@
             if (r.status >= 200 && r.status < 300 && !j?.error) resolve(j)
             else reject(new Error(j?.error || `HTTP ${r.status}`))
           },
-          onerror: () => reject(new Error("连不上本地服务")),
-          ontimeout: () => reject(new Error("本地服务超时")),
+          onerror: () => reject(new Error(L("连不上本地服务", "cannot reach the local server"))),  // i18n-ok
+          ontimeout: () => reject(new Error(L("本地服务超时", "local server timed out"))),  // i18n-ok
         })
       })
     }
@@ -89,7 +101,7 @@
       if (!name) return
       const mode = String(character.character?.gameMode || "")
       // a character that is known to be a normal one belongs to the main script
-      if (mode && !/ironcow/i.test(mode)) return badge(`${name} 不是铁牛角色，未导入`, false)
+      if (mode && !/ironcow/i.test(mode)) return badge(L(`${name} 不是铁牛角色，未导入`, `${name} is not an ironcow character, not imported`), false)  // i18n-ok
       const captures = GM_getValue(CAPTURES, {}) || {}
       captures[name] = { name, capturedAt: Date.now(), character }
       GM_setValue(CAPTURES, captures)
@@ -101,10 +113,10 @@
       try {
         await post("/api/ironcow/game", body)
         if (body.initClientData) lastClientData = initClientData
-        badge(`已导入 ${name}`, true)
+        badge(L(`已导入 ${name}`, `imported ${name}`), true)  // i18n-ok
       } catch {
         // no local server: the web version picks it up when opened
-        badge(`已读取 ${name}，打开网页版工具即可导入`, true)
+        badge(L(`已读取 ${name}，打开网页版工具即可导入`, `read ${name}, open the web tool to import`), true)  // i18n-ok
       }
     }
 
@@ -115,12 +127,12 @@
           b = document.createElement("div")
           b.id = "fastsim-ironcow-badge"
           b.style.cssText = "position:fixed;left:8px;bottom:36px;z-index:99999;padding:4px 8px;border-radius:6px;font:12px sans-serif;color:#fff;opacity:.9;cursor:pointer"
-          b.title = "MWI 战斗工具 · 铁牛导入，点击隐藏"
+          b.title = L("MWI 战斗工具 · 铁牛导入，点击隐藏", "MWI Combat Tools · Ironcow import, click to hide")  // i18n-ok
           b.onclick = () => b.remove()
           document.body.appendChild(b)
         }
         b.style.background = ok ? "#8250df" : "#9a6700"
-        b.textContent = `铁牛导入：${text}`
+        b.textContent = L(`铁牛导入：${text}`, `Ironcow import: ${text}`)  // i18n-ok
       }
       if (document.body) add()
       else document.addEventListener("DOMContentLoaded", add, { once: true })
@@ -143,7 +155,7 @@
     setTimeout(() => {
       if (done) return
       const o = characterFromStorage()
-      if (!o) return badge("没读到角色数据，刷新游戏页面试试", false)
+      if (!o) return badge(L("没读到角色数据，刷新游戏页面试试", "no character data found, try reloading the game page"), false)  // i18n-ok
       done = true
       onCharacter(o)
     }, 15000)

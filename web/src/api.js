@@ -1,4 +1,5 @@
 import { reactive } from "vue"
+import { applyLang, lang, t, tk } from "./i18n.js"
 
 // Two ways to run: the local server (node server.mjs + native engine) answers /api/*, or, when the
 // page is served statically (no server), everything runs in the browser (wasm engine).
@@ -38,6 +39,8 @@ export const store = reactive({
 
 export async function loadState() {
   store.mode = await detectMode()
+  // the backend builds names and messages in the page's language
+  await call("PUT", "/api/lang", { lang: lang.value }).catch(() => {})
   // options first: it starts the engine, so the state below reports it
   const [opts, loadouts] = await Promise.all([call("GET", "/api/options"), call("GET", "/api/loadouts")])
   const st = await call("GET", "/api/state")
@@ -47,6 +50,13 @@ export async function loadState() {
   store.options = opts
   store.loadouts = loadouts
   store.loaded = true
+}
+
+/** Switches the UI language and reloads what the backend named in the old one. */
+export async function changeLang(v) {
+  applyLang(v)
+  await call("PUT", "/api/lang", { lang: lang.value }).catch(() => {})
+  if (store.loaded) store.options = await call("GET", "/api/options")
 }
 
 export async function saveTeam() {
@@ -85,20 +95,21 @@ export const pct = v => (v == null || !Number.isFinite(v) ? "—" : `${(v * 100)
 /** Hours as "x 小时" / "x 天". */
 export function duration(h) {
   if (h == null || !Number.isFinite(h)) return "—"
-  if (h <= 0) return "已达到"
-  if (h < 1) return `${Math.max(1, Math.round(h * 60))} 分钟`
-  return h < 48 ? `${h.toFixed(1)} 小时` : `${(h / 24).toFixed(1)} 天`
+  if (h <= 0) return t("已达到")
+  if (h < 1) return t("{n} 分钟", { n: Math.max(1, Math.round(h * 60)) })
+  return h < 48 ? t("{n} 小时", { n: h.toFixed(1) }) : t("{n} 天", { n: (h / 24).toFixed(1) })
 }
 
-export const COMBAT_SKILLS = [["stamina", "耐力"], ["intelligence", "智力"], ["attack", "攻击"], ["melee", "近战"], ["defense", "防御"], ["ranged", "远程"], ["magic", "魔法"]]
+/** [key, label] — labels are t() keys. */
+export const COMBAT_SKILLS = [["stamina", tk("耐力")], ["intelligence", tk("智力")], ["attack", tk("攻击")], ["melee", tk("近战")], ["defense", tk("防御")], ["ranged", tk("远程")], ["magic", tk("魔法")]]
 
-const ATTACK_NAMES = { autoAttack: "普攻", damageOverTime: "持续伤害", parry: "招架", retaliation: "反击", physicalThorns: "物理荆棘", elementalThorns: "元素荆棘", unknown: "未知" }
+const ATTACK_NAMES = { autoAttack: tk("普攻"), damageOverTime: tk("持续伤害"), parry: tk("招架"), retaliation: tk("反击"), physicalThorns: tk("物理荆棘"), elementalThorns: tk("元素荆棘"), unknown: tk("未知") }
 /** Ability / attack kind keys of a simResult's `attacks` and `deathCauses`. */
 export function attackName(k) {
-  return store.options?.names.abilities[k] || ATTACK_NAMES[k] || k
+  return store.options?.names.abilities[k] || (ATTACK_NAMES[k] ? t(ATTACK_NAMES[k]) : k)
 }
 export function monsterName(h) {
-  return (h && store.options?.names.monsters[h]) || (h === "unknown" ? "未知" : h) || "—"
+  return (h && store.options?.names.monsters[h]) || (h === "unknown" ? t("未知") : h) || "—"
 }
 
 export function itemName(h) {
@@ -110,10 +121,10 @@ export function abilityName(h) {
 export function zoneName(h) {
   return (h && store.options?.names.zones[h]) || h || "—"
 }
-export function targetLabel(t) {
-  if (!t) return "—"
-  if (t.kind === "labyrinth") return `迷宫 ${store.options?.names.monsters[t.labyrinthHrid] || t.labyrinthHrid} · 房间 ${t.roomLevel}`
-  return `${zoneName(t.zoneHrid)} · T${t.difficultyTier}`
+export function targetLabel(x) {
+  if (!x) return "—"
+  if (x.kind === "labyrinth") return t("迷宫 {name} · 房间 {room}", { name: store.options?.names.monsters[x.labyrinthHrid] || x.labyrinthHrid, room: x.roomLevel })
+  return `${zoneName(x.zoneHrid)} · T${x.difficultyTier}`
 }
 
 // last chosen target / community buffs, shared by all pages
@@ -156,13 +167,13 @@ export function defaultExtra() {
 
 /** Readable trigger of an ability/consumable in a member config ("游戏默认" when not set). */
 export function triggerText(member, hrid) {
-  if (!member?.triggerMap || !Object.prototype.hasOwnProperty.call(member.triggerMap, hrid)) return "游戏默认"
-  const t = member.triggerMap[hrid]
-  if (!t.length) return "无条件（冷却好就用）"
+  if (!member?.triggerMap || !Object.prototype.hasOwnProperty.call(member.triggerMap, hrid)) return t("游戏默认")
+  const list = member.triggerMap[hrid]
+  if (!list.length) return t("无条件（冷却好就用）")
   const o = store.options.trigger
   const n = (list, h) => list.find(x => x.hrid === h)?.name || h.split("/").pop()
-  return t.map(c => {
+  return list.map(c => {
     const cmp = o.comparators.find(x => x.hrid === c.comparatorHrid)
-    return `${n(o.dependencies, c.dependencyHrid)}${n(o.conditions, c.conditionHrid)} ${cmp?.name || ""}${cmp?.allowValue ? ` ${c.value}` : ""}`
-  }).join(" 且 ")
+    return `${n(o.dependencies, c.dependencyHrid)}${lang.value === "en" ? " " : ""}${n(o.conditions, c.conditionHrid)} ${cmp?.name || ""}${cmp?.allowValue ? ` ${c.value}` : ""}`
+  }).join(t(" 且 "))
 }

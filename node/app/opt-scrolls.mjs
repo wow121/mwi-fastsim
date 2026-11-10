@@ -6,6 +6,7 @@
 import { pool } from "./search.mjs"
 import { seedList, vsBase } from "./evaluator.mjs"
 import { COMBAT_SEALS } from "./game.mjs"
+import { t } from "./lang.mjs"
 
 const PER_HOUR = 2 // one scroll = 30 minutes of buff
 
@@ -15,7 +16,7 @@ const PER_HOUR = 2 // one scroll = 30 minutes of buff
  */
 export async function scrollValue(ev, params, api) {
   const { members, target, extra = {} } = params
-  if (target?.kind === "labyrinth") throw new Error("卷轴在迷宫里不生效，请选择区域或地下城")
+  if (target?.kind === "labyrinth") throw new Error(t("卷轴在迷宫里不生效，请选择区域或地下城"))
   const { book } = ev.ctx
   const hours = params.hours || 24
   const seedBase = Number(params.seedBase || 616161)
@@ -29,7 +30,7 @@ export async function scrollValue(ev, params, api) {
   let done = 0
   const run = async (team, ex, s = seeds) => {
     const r = await ev.evaluate(team, target, { hours, seeds: s, extra: ex, signal: api.signal })
-    api.progress(++done, total, "模拟")
+    api.progress(++done, total, t("模拟#progress"))
     return r
   }
   // over 4× the seeds (the first ones shared): every scroll is compared with this one base (see vsBase)

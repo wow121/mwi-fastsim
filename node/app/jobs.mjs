@@ -2,6 +2,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { calibration, paramsKey, trackProgress } from "./job-progress.mjs"
+import { t } from "./lang.mjs"
 
 export class Jobs {
   constructor(dir) {
@@ -67,7 +68,7 @@ export class Jobs {
     const controller = new AbortController()
     const key = paramsKey(type, params)
     const prior = this.prior(key)
-    const j = { id, type, title, params, key, status: "running", createdAt: Date.now(), progress: { done: 0, total: 0, stage: "准备中" }, log: [], result: null, controller }
+    const j = { id, type, title, params, key, status: "running", createdAt: Date.now(), progress: { done: 0, total: 0, stage: t("准备中") }, log: [], result: null, controller }
     this.jobs.set(id, j)
     let lastSave = 0
     const api = {

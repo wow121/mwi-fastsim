@@ -1,11 +1,13 @@
 // Class-based ability pools, orders, finishers and trigger presets — ported from the combat-sim
 // site's skill optimizer (index bundle: AI, MI, ng, FI, ZI, NI, k5, D5, x5).
+import { t, tk } from "./lang.mjs"
+
 const A = e => `/abilities/${e}`
 const D = e => `/combat_trigger_dependencies/${e}`
 const C = e => `/combat_trigger_conditions/${e}`
 const K = e => `/combat_trigger_comparators/${e}`
 
-export const CLASS_NAMES = { water: "水法", fire: "火法", nature: "自然法", sword: "剑", mace: "锤", spear: "枪", bow: "弓", crossbow: "弩", shield: "盾" }
+export const CLASS_NAMES = { water: tk("水法"), fire: tk("火法"), nature: tk("自然法"), sword: tk("剑"), mace: tk("锤"), spear: tk("枪"), bow: tk("弓"), crossbow: tk("弩"), shield: tk("盾") }
 
 export const POOLS = {
   water: ["elemental_affinity", "frost_surge", "mana_spring", "water_strike", "precision", "ice_spear"],
@@ -42,31 +44,32 @@ const lowestHp = () => cond("all_allies", "lowest_hp_percentage", "less_than_equ
 const missingHp = () => cond("all_allies", "missing_hp", "greater_than_equal", 1000, "search", "absolute")
 const inactive = e => cond("self", e, "is_inactive")
 const mpSafe = () => cond("self", "current_mp", "greater_than_equal", 200)
-const preset = (id, label, checked, conditions) => ({ id, label, checked, conditions })
+// labels are t() keys, shown in the language of the request
+const preset = (id, label, checked, conditions) => ({ id, label: t(label), checked, conditions })
 
 /** `FI`: trigger presets of an ability (checked = used by default). */
 export function presets(m, hrid) {
-  const t = hrid.split("/").at(-1) || ""
-  if (["elemental_affinity", "frenzy", "vampirism"].includes(t))
-    return [preset("default-inactive", "效果未生效", true, [inactive(t)]), preset("mp-safe", "效果未生效 且 我的当前MP ≥ 200", false, [inactive(t), mpSafe()])]
-  if (["precision", "berserk"].includes(t)) return [preset("default-inactive", "效果未生效", true, [inactive(t)])]
-  if (["frost_surge", "smoke_burst"].includes(t))
-    return [preset("always", "所有敌人的当前HP ≥ 1", true, [enemyHp(1)]), preset("hp-search", "所有敌人的当前HP ≥ 阈值", false, [enemyHp(2000, "search")])]
-  if (["mana_spring", "ice_spear", "life_drain", "entangle", "fireball"].includes(t)) return [preset("always", "所有敌人的当前HP ≥ 1", true, [enemyHp(1)])]
-  if (t === "water_strike") return [preset("empty", "无条件", true, [])]
-  if (["firestorm", "flame_blast"].includes(t))
-    return [preset("always", "所有敌人的当前HP ≥ 1", true, [enemyHp(1)]), preset("hp-search", "所有敌人的当前HP ≥ 阈值", false, [enemyHp(2000, "search")]), preset("multi-hp-search", "所有敌人的存活数 ≥ 2 且 所有敌人的当前HP ≥ 阈值", false, [multi(), enemyHp(2000, "search")])]
-  if (["toxic_pollen", "natures_veil"].includes(t))
-    return [preset("hp-search", "所有敌人的当前HP ≥ 阈值", true, [enemyHp(2000, "search")]), preset("multi", "所有敌人的存活数 ≥ 2", true, [multi()])]
-  if (t === "quick_aid") return [preset("lowest-hp", "所有队友的最低HP% ≤ 阈值", true, [lowestHp()]), preset("missing-hp", "所有队友的缺失HP ≥ 阈值", false, [missingHp()])]
-  if (t === "rejuvenate") return [preset("missing-hp", "所有队友的缺失HP ≥ 阈值", true, [missingHp()]), preset("lowest-hp", "所有队友的最低HP% ≤ 阈值", true, [lowestHp()])]
-  if (["maim", "fracturing_impact", "puncture", "pestilent_shot", "steady_shot"].includes(t)) return [preset("target-hp", "目标敌人的当前HP ≥ 阈值", true, [targetHp()])]
-  if (["crippling_slash", "cleave", "stunning_blow", "sweep", "penetrating_strike", "penetrating_shot", "rain_of_arrows", "shield_bash"].includes(t))
-    return [preset("hp-search", "所有敌人的当前HP ≥ 阈值", true, [enemyHp(2000, "search")])]
-  if (["provoke", "spike_shell", "retribution"].includes(t)) return [preset("empty", "无条件", true, [])]
-  if (t === "elusiveness") return [preset("empty", "无条件", true, []), preset("other-inactive", "坚韧未生效", false, [inactive("toughness")])]
-  if (t === "toughness") return [preset("empty", "无条件", true, []), preset("other-inactive", "闪避未生效", false, [inactive("elusiveness")])]
-  return [preset("game-default", "游戏默认", true, (m.$e.abilityDetailMap[hrid]?.defaultCombatTriggers || []).slice(0, 4).map(c => ({ ...c })))]
+  const ab = hrid.split("/").at(-1) || ""
+  if (["elemental_affinity", "frenzy", "vampirism"].includes(ab))
+    return [preset("default-inactive", tk("效果未生效"), true, [inactive(ab)]), preset("mp-safe", tk("效果未生效 且 我的当前MP ≥ 200"), false, [inactive(ab), mpSafe()])]
+  if (["precision", "berserk"].includes(ab)) return [preset("default-inactive", tk("效果未生效"), true, [inactive(ab)])]
+  if (["frost_surge", "smoke_burst"].includes(ab))
+    return [preset("always", tk("所有敌人的当前HP ≥ 1"), true, [enemyHp(1)]), preset("hp-search", tk("所有敌人的当前HP ≥ 阈值"), false, [enemyHp(2000, "search")])]
+  if (["mana_spring", "ice_spear", "life_drain", "entangle", "fireball"].includes(ab)) return [preset("always", tk("所有敌人的当前HP ≥ 1"), true, [enemyHp(1)])]
+  if (ab === "water_strike") return [preset("empty", tk("无条件"), true, [])]
+  if (["firestorm", "flame_blast"].includes(ab))
+    return [preset("always", tk("所有敌人的当前HP ≥ 1"), true, [enemyHp(1)]), preset("hp-search", tk("所有敌人的当前HP ≥ 阈值"), false, [enemyHp(2000, "search")]), preset("multi-hp-search", tk("所有敌人的存活数 ≥ 2 且 所有敌人的当前HP ≥ 阈值"), false, [multi(), enemyHp(2000, "search")])]
+  if (["toxic_pollen", "natures_veil"].includes(ab))
+    return [preset("hp-search", tk("所有敌人的当前HP ≥ 阈值"), true, [enemyHp(2000, "search")]), preset("multi", tk("所有敌人的存活数 ≥ 2"), true, [multi()])]
+  if (ab === "quick_aid") return [preset("lowest-hp", tk("所有队友的最低HP% ≤ 阈值"), true, [lowestHp()]), preset("missing-hp", tk("所有队友的缺失HP ≥ 阈值"), false, [missingHp()])]
+  if (ab === "rejuvenate") return [preset("missing-hp", tk("所有队友的缺失HP ≥ 阈值"), true, [missingHp()]), preset("lowest-hp", tk("所有队友的最低HP% ≤ 阈值"), true, [lowestHp()])]
+  if (["maim", "fracturing_impact", "puncture", "pestilent_shot", "steady_shot"].includes(ab)) return [preset("target-hp", tk("目标敌人的当前HP ≥ 阈值"), true, [targetHp()])]
+  if (["crippling_slash", "cleave", "stunning_blow", "sweep", "penetrating_strike", "penetrating_shot", "rain_of_arrows", "shield_bash"].includes(ab))
+    return [preset("hp-search", tk("所有敌人的当前HP ≥ 阈值"), true, [enemyHp(2000, "search")])]
+  if (["provoke", "spike_shell", "retribution"].includes(ab)) return [preset("empty", tk("无条件"), true, [])]
+  if (ab === "elusiveness") return [preset("empty", tk("无条件"), true, []), preset("other-inactive", tk("坚韧未生效"), false, [inactive("toughness")])]
+  if (ab === "toughness") return [preset("empty", tk("无条件"), true, []), preset("other-inactive", tk("闪避未生效"), false, [inactive("elusiveness")])]
+  return [preset("game-default", tk("游戏默认"), true, (m.$e.abilityDetailMap[hrid]?.defaultCombatTriggers || []).slice(0, 4).map(c => ({ ...c })))]
 }
 
 /** `ZI`: class of a weapon. */
@@ -132,7 +135,7 @@ export function presetVariants(m, group, checkedOnly = true) {
   let out = [{}]
   for (const h of group) {
     const ps = presets(m, h).filter(p => !checkedOnly || p.checked)
-    const list = ps.length ? ps : [preset("empty", "无条件", true, [])]
+    const list = ps.length ? ps : [preset("empty", tk("无条件"), true, [])]
     out = out.flatMap(v => list.map(p => ({ ...v, [h]: p })))
   }
   return out
@@ -148,7 +151,7 @@ export function memberPool(m, cfg, { crossElement = false } = {}) {
   for (const a of cfg.abilities || []) if (a?.abilityHrid) levels[a.abilityHrid] = Math.max(Number(levels[a.abilityHrid] || 0), Number(a.level || 1))
   const names = cls && crossElement && MAGES.includes(cls) ? [...new Set([POOLS[cls], ...MAGES.map(c => POOLS[c])].flat())] : cls ? POOLS[cls] : []
   const pool = names.map(A).map(h => ({ hrid: h, level: Number(levels[h] || 0), learned: Number(levels[h] || 0) > 0 }))
-  return { cls, className: cls ? CLASS_NAMES[cls] : "未识别", pool, slots: normalSlots(m, cfg.levels?.intelligence) }
+  return { cls, className: cls ? t(CLASS_NAMES[cls]) : t("未识别"), pool, slots: normalSlots(m, cfg.levels?.intelligence) }
 }
 
 /** Comparable form of a trigger (list of conditions, all of which must hold): conditions that always hold while

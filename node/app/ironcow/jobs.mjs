@@ -3,6 +3,7 @@
 import { pool } from "../search.mjs"
 import { seedList } from "../evaluator.mjs"
 import { zh } from "../i18n.mjs"
+import { t, tk } from "../lang.mjs"
 import { optimizeSkills } from "../opt-skills.mjs"
 import { optimizeConsumables } from "../opt-consumables.mjs"
 import { IronEvaluator, IRONCOW_OBJECTIVES, normalizeIronCfg } from "./evaluator.mjs"
@@ -21,17 +22,17 @@ async function zones(ev0, params, api) {
   const seeds = seedList(Number(params.seedBase || 424242), params.seeds || 8)
   const { m } = ev.ctx
   let done = 0
-  const rows = await pool(params.targets, 16, async (t) => {
+  const rows = await pool(params.targets, 16, async (target) => {
     let r
     try {
-      r = await ev.evaluate(params.members, t, { hours, seeds, extra: params.extra, signal: api.signal })
+      r = await ev.evaluate(params.members, target, { hours, seeds, extra: params.extra, signal: api.signal })
     } catch (e) {
       if (api.signal.aborted) throw e
-      return { target: t, error: String(e.message || e) }
+      return { target, error: String(e.message || e) }
     }
     done++
-    api.progress(done, params.targets.length, "模拟各区域")
-    return { target: t, name: zh(m.$e, t.zoneHrid), isDungeon: !!m.$e.actionDetailMap[t.zoneHrid]?.combatZoneInfo?.isDungeon, value: r.value, metrics: r.mean }
+    api.progress(done, params.targets.length, t("模拟各区域"))
+    return { target, name: zh(m.$e, target.zoneHrid), isDungeon: !!m.$e.actionDetailMap[target.zoneHrid]?.combatZoneInfo?.isDungeon, value: r.value, metrics: r.mean }
   })
   rows.sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))
   return { rows, hours, seeds: seeds.length, objective: ev.metrics.cfg.objective }
@@ -53,15 +54,15 @@ async function consumables(ev0, params, api) {
       const c = ct.of(h)
       return c.action && !c.missing.size && !c.locked.size
     }))
-    api.log(`只用现在能手搓的：${allowItems.length} 种`)
+    api.log(t("只用现在能手搓的：{n} 种", { n: allowItems.length }))
   }
   return { ...(await optimizeConsumables(ev, { ...params, objective: ev.objective, allowItems }, api)), ironcowObjective: ev.metrics.cfg.objective }
 }
 
 export const IRONCOW_JOBS = {
-  "ironcow-zones": { title: "铁牛 · 刷图推荐", run: zones },
-  "ironcow-skills": { title: "铁牛 · 技能优化", run: skills },
-  "ironcow-consumables": { title: "铁牛 · 食物饮料优化", run: consumables },
+  "ironcow-zones": { title: tk("铁牛 · 刷图推荐"), run: zones },
+  "ironcow-skills": { title: tk("铁牛 · 技能优化"), run: skills },
+  "ironcow-consumables": { title: tk("铁牛 · 食物饮料优化"), run: consumables },
 }
 
 /** Hand-work time of every combat food / drink (and optional extra items) with its recipe tree. */
@@ -70,8 +71,8 @@ export function craftTable(m, body) {
   const ct = new CraftTimes(m.$e, cfg.crafts[0])
   const list = [...combatConsumables(m.$e).map(i => i.hrid), ...(body.items || [])]
   return {
-    skills: LIFE_SKILLS.map(k => ({ key: k, name: SKILL_NAMES[k] })),
-    objectives: IRONCOW_OBJECTIVES,
+    skills: LIFE_SKILLS.map(k => ({ key: k, name: t(SKILL_NAMES[k]) })),
+    objectives: Object.fromEntries(Object.entries(IRONCOW_OBJECTIVES).map(([k, v]) => [k, t(v)])),
     rows: [...new Set(list)].map(h => {
       const c = ct.of(h)
       const it = m.$e.itemDetailMap[h]

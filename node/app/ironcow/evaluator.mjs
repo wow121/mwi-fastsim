@@ -9,16 +9,18 @@ import { buildPayload } from "../model.mjs"
 import { activePlayer, dungeonInfo, effectiveTime, outOfManaRatio, playerDrops, runs } from "../metrics.mjs"
 import { OBJECTIVE_FORMATS, spread } from "../evaluator.mjs"
 import { CraftTimes } from "./craft.mjs"
+import { t, tk } from "../lang.mjs"
 
 const HOUR = 3600e9
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
 
-export const IRONCOW_OBJECTIVES = { items: "目标物品", coins: "商店卖价金币", xp: "经验" }
+// t() keys: translate where shown
+export const IRONCOW_OBJECTIVES = { items: tk("目标物品"), coins: tk("商店卖价金币"), xp: tk("经验") }
 
 // optimizer logs (opt-skills / opt-consumables) format objective values through this registry
-OBJECTIVE_FORMATS["ironcow-items"] = v => `${(v * 24).toFixed(2)} 个目标物品/天（含手搓时间）`
-OBJECTIVE_FORMATS["ironcow-coins"] = v => `${(v * 24 / 1e6).toFixed(2)}M 商店金币/天（含手搓时间）`
-OBJECTIVE_FORMATS["ironcow-xp"] = v => `${Math.round(v).toLocaleString()} 经验/小时（含手搓时间）`
+OBJECTIVE_FORMATS["ironcow-items"] = v => t("{n} 个目标物品/天（含手搓时间）", { n: (v * 24).toFixed(2) })
+OBJECTIVE_FORMATS["ironcow-coins"] = v => t("{n}M 商店金币/天（含手搓时间）", { n: (v * 24 / 1e6).toFixed(2) })
+OBJECTIVE_FORMATS["ironcow-xp"] = v => t("{n} 经验/小时（含手搓时间）", { n: Math.round(v).toLocaleString() })
 
 /** cfg: { targets: [{ hrid, weight }], objective: "items" | "coins" | "xp", craft: craft.mjs cfg, or one per member } */
 export function normalizeIronCfg(cfg = {}) {

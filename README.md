@@ -5,11 +5,13 @@ Milky Way Idle（牛牛放置）的战斗模拟与整队优化工具。
 **在线使用：https://wow121.github.io/mwi-fastsim/** 打开就能用装备获取成本；模拟和优化要用自己的队伍，先安装 [油猴脚本](https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js)，再打开一次游戏页面。
 
 *A fast combat simulator and team optimizer for Milky Way Idle. The engine is written in Rust and runs either
-natively behind a small local server or as WebAssembly entirely in the browser. The UI is in Chinese.*
+natively behind a small local server or as WebAssembly entirely in the browser. The UI is in Chinese and English
+(switch at the bottom of the sidebar; it follows the browser's language at first).*
 
 - **快**：战斗引擎用 Rust 重写，单线程约为原版 JS 引擎的 12 倍（WebAssembly 约 7 倍），并且多线程并行。
 - **整队优化**：不用一个角色一个角色地调，技能、触发条件、药品、装备提升都按整个队伍一起搜索。
 - **两种用法，同一份网页**：本机运行一个小服务（原生引擎，最快）；或者把网页放到任意静态网站，打开即用，计算在访问者自己的浏览器里完成。
+- **中英双语**：界面有中文和英文，在左侧栏底部切换（第一次打开按浏览器语言）；物品、怪物、技能名用游戏自己的中文 / 英文名。
 - **数据来自游戏本身**：油猴脚本在游戏页面读取角色、队友和游戏数据，不用手动录入。所有数据只保存在你自己的电脑或浏览器里。
 
 ## 功能
@@ -103,6 +105,8 @@ node/
     opt-*.mjs          各优化器
     gear-cost.mjs      装备获取成本
     routes-core.mjs    接口处理
+    lang.mjs           界面语言：t("中文") 以中文原文为键，英文在 locales/en/*.mjs
+    i18n.mjs           游戏名称（物品、技能、怪物……）按当前语言取中文或英文名
     ironcow/           铁牛模式（手搓成本、评估器、导入）
 web/               网页（Vue 3 + Element Plus）
   src/local/         浏览器版的接口实现（IndexedDB + WebAssembly Worker 池）
@@ -123,6 +127,7 @@ userscript/        油猴脚本
 | `node test-import.mjs` | 游戏数据导入的往返测试 |
 | `node browser-test.mjs` | 用无头 Edge / Chrome 运行浏览器版，和本地服务的结果比对 |
 | `node check-prims.mjs` | Rust 的随机数和 `pow` 与 V8 逐位比对 |
+| `node check-i18n.mjs` | 界面翻译：没有英文的 `t()` 键、没包在 `t()` 里的中文、占位符对不上的英文（不需要游戏数据） |
 | `node smoke.mjs` 等 | 接口和各优化器的端到端测试（另有 `test-upgrades.mjs`、`test-goal.mjs`、`test-gear-cost.mjs`、`test-labyrinth.mjs`、`test-statvalue.mjs`、`test-scrolls.mjs`） |
 
 ## 反馈

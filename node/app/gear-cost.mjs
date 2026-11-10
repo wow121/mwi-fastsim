@@ -5,6 +5,7 @@
 // the player already has (sell it, mirror it up as the main item, use it as a pad, un-refine it).
 import { GearPrices, pricedBook } from "./opt-upgrades.mjs"
 import { zh } from "./i18n.mjs"
+import { t } from "./lang.mjs"
 
 const INF = Number.POSITIVE_INFINITY
 const ARTISAN = 0.89
@@ -20,16 +21,16 @@ function describe(game, gp, steps) {
     if (s.op === "buy") {
       const k = `${s.h}|${s.n}`
       buy.set(k, { h: s.h, name: nm(s.h), n: s.n, count: (buy.get(k)?.count || 0) + 1, price: s.cost })
-      return { text: `买 ${nm(s.h)} +${s.n}`, cost: s.cost }
+      return { text: t("买 {item} +{n}", { item: nm(s.h), n: s.n }), cost: s.cost }
     }
     if (s.op === "refine") {
       refines++
-      return { text: `精炼 ${nm(s.h)} +${s.n} → ${nm(s.to)} +${s.n}`, cost: s.cost }
+      return { text: t("精炼 {item} +{n} → {to} +{n}", { item: nm(s.h), to: nm(s.to), n: s.n }), cost: s.cost }
     }
-    if (s.op === "unrefine") return { text: `解精炼 ${nm(s.h)} +${s.n} → ${nm(s.to)} +${s.n}（拿回一半精炼材料）`, cost: s.cost }
-    if (s.op === "keep") return { text: `手上的 ${nm(s.h)} +${s.n}`, cost: 0 }
+    if (s.op === "unrefine") return { text: t("解精炼 {item} +{n} → {to} +{n}（拿回一半精炼材料）", { item: nm(s.h), to: nm(s.to), n: s.n }), cost: s.cost }
+    if (s.op === "keep") return { text: t("手上的 {item} +{n}", { item: nm(s.h), n: s.n }), cost: 0 }
     mirrors++
-    return { text: `镜子：${nm(s.h)} +${s.from}（主件）+ ${nm(s.pad)} +${s.padLevel}（垫子）→ +${s.from + 1}`, cost: s.cost }
+    return { text: t("镜子：{item} +{from}（主件）+ {pad} +{padLevel}（垫子）→ +{to}", { item: nm(s.h), from: s.from, pad: nm(s.pad), padLevel: s.padLevel, to: s.from + 1 }), cost: s.cost }
   })
   const shopping = [...buy.values()].sort((a, b) => a.n - b.n)
   if (mirrors) shopping.push({ h: "/items/philosophers_mirror", name: nm("/items/philosophers_mirror"), n: 0, count: mirrors, price: gp.mirror })
@@ -60,35 +61,35 @@ export function gearCost(game, rawBook, params) {
   const gp = new GearPrices(maps, book, tax, { refinedResale: params.refinedResale || "market" })
   const h = String(params.hrid || "")
   const n = Math.max(0, Math.floor(Number(params.level || 0)))
-  if (!maps.itemDetailMap[h]?.equipmentDetail) throw new Error("请选择一件装备")
-  if (n > gp.cap) throw new Error(`强化等级最高 +${gp.cap}`)
+  if (!maps.itemDetailMap[h]?.equipmentDetail) throw new Error(t("请选择一件装备"))
+  if (n > gp.cap) throw new Error(t("强化等级最高 +{cap}", { cap: gp.cap }))
   const f = gp.family(h)
   const nm = x => zh(maps, x)
   const q = gp.quote(h, n)
 
   const options = []
   const add = (key, label, steps, note) => {
-    if (!steps) return options.push({ key, label, cost: null, note: note || "买不到" })
+    if (!steps) return options.push({ key, label, cost: null, note: note || t("买不到") })
     const d = describe(game, gp, steps)
     options.push({ key, label, cost: d.total, lines: d.lines, shopping: d.shopping, mirrors: d.mirrors, refines: d.refines, note })
   }
 
   // 1) straight from the market
-  add("market", "直接买", q.ask < INF ? [{ op: "buy", h, n, cost: q.ask }] : null, q.ask < INF ? "" : "市场上没人卖这个等级")
+  add("market", t("直接买"), q.ask < INF ? [{ op: "buy", h, n, cost: q.ask }] : null, q.ask < INF ? "" : t("市场上没人卖这个等级"))
   // 2) the cheapest route from scratch (market / mirror / refine, recursively)
   const best = gp.recipe(h, n)
-  add("cheapest", "最便宜的路线（从零开始）", best)
+  add("cheapest", t("最便宜的路线（从零开始）"), best)
   // 3) mirror all the way from a bought low level (shows the mirror chain even when not cheapest)
   for (const from of [n - 1, n - 2, n - 3]) {
     if (from < 1 || from >= n) continue
     const start = gp.recipe(h, from)
     const up = mirrorUp(gp, h, from, n)
-    if (start && up) add(`mirror-${from}`, `买 +${from} 再用镜子升到 +${n}`, [...start, ...up])
+    if (start && up) add(`mirror-${from}`, t("买 +{from} 再用镜子升到 +{n}", { from, n }), [...start, ...up])
   }
   // 4) refined target: buy the normal version at this level and refine
   if (h === f.refined) {
     const r = gp.recipe(f.base, n)
-    add("refine", `买普通 +${n} 自己精炼`, r ? [...r, { op: "refine", h: f.base, to: h, n, cost: f.refineCost }] : null)
+    add("refine", t("买普通 +{n} 自己精炼", { n }), r ? [...r, { op: "refine", h: f.base, to: h, n, cost: f.refineCost }] : null)
   }
   // 5) starting from a held piece of the same family
   const held = params.held?.hrid ? { h: String(params.held.hrid), n: Math.max(0, Math.floor(Number(params.held.level || 0))) } : null
@@ -96,25 +97,25 @@ export function gearCost(game, rawBook, params) {
     const same = gp.family(held.h).base === f.base
     if (same && (held.h === h || (held.h === f.base && h === f.refined)) && n >= held.n) {
       const up = mirrorUp(gp, held.h === h ? h : f.base, held.n, n)
-      if (up) add("main", `手上的 +${held.n} 当主件${n > held.n ? "用镜子升级" : ""}${held.h === h ? "" : "，再精炼"}`, [{ op: "keep", h: held.h, n: held.n }, ...up, ...(held.h === h ? [] : [{ op: "refine", h: f.base, to: h, n, cost: f.refineCost }])])
+      if (up) add("main", t("手上的 +{n} 当主件", { n: held.n }) + (n > held.n ? t("用镜子升级") : "") + (held.h === h ? "" : t("，再精炼")), [{ op: "keep", h: held.h, n: held.n }, ...up, ...(held.h === h ? [] : [{ op: "refine", h: f.base, to: h, n, cost: f.refineCost }])])
     }
     // held refined piece, normal target: un-refine it, then main item or pad
     if (same && held.h === f.refined && h === f.base) {
       const unref = { op: "unrefine", h: f.refined, to: f.base, n: held.n, cost: -f.unrefineValue }
       if (n >= held.n) {
         const up = mirrorUp(gp, h, held.n, n)
-        if (up) add("unrefine-main", `解精炼手上的 +${held.n}${n > held.n ? "，再用镜子升级" : ""}`, [{ op: "keep", h: held.h, n: held.n }, unref, ...up])
+        if (up) add("unrefine-main", t("解精炼手上的 +{n}", { n: held.n }) + (n > held.n ? t("，再用镜子升级") : ""), [{ op: "keep", h: held.h, n: held.n }, unref, ...up])
       }
       if (n >= held.n + 2) {
         const main = gp.recipe(h, held.n + 1)
         const up = mirrorUp(gp, h, held.n + 2, n)
-        if (main && up) add("unrefine-pad", `解精炼手上的 +${held.n} 当垫子（买 +${held.n + 1} 当主件）`, [{ op: "keep", h: held.h, n: held.n }, unref, ...main, { op: "mirror", h, from: held.n + 1, pad: f.base, padLevel: held.n, cost: gp.mirror }, ...up])
+        if (main && up) add("unrefine-pad", t("解精炼手上的 +{n} 当垫子（买 +{main} 当主件）", { n: held.n, main: held.n + 1 }), [{ op: "keep", h: held.h, n: held.n }, unref, ...main, { op: "mirror", h, from: held.n + 1, pad: f.base, padLevel: held.n, cost: gp.mirror }, ...up])
       }
     }
     if (same && (held.h === h || held.h === f.base) && n >= held.n + 2) {
       const main = gp.recipe(h, held.n + 1)
       const up = mirrorUp(gp, h, held.n + 2, n)
-      if (main && up) add("pad", `手上的 +${held.n} 当垫子（买 +${held.n + 1} 当主件）`, [{ op: "keep", h: held.h, n: held.n }, ...main, { op: "mirror", h, from: held.n + 1, pad: held.h, padLevel: held.n, cost: gp.mirror }, ...up])
+      if (main && up) add("pad", t("手上的 +{n} 当垫子（买 +{main} 当主件）", { n: held.n, main: held.n + 1 }), [{ op: "keep", h: held.h, n: held.n }, ...main, { op: "mirror", h, from: held.n + 1, pad: held.h, padLevel: held.n, cost: gp.mirror }, ...up])
     }
   }
   // net cost: routes that do not use the held piece leave it to be sold

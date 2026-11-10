@@ -9,6 +9,7 @@ import { teamDTO } from "@app/model.mjs"
 import { options } from "@app/options.mjs"
 import { decodeGameData } from "@app/gamedata.mjs"
 import { hash53 } from "@app/hash.mjs"
+import { setLang, t } from "@app/lang.mjs"
 import { EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes, jobRoutes, simulate, skillPools, teamFromGame, teamFromSite } from "@app/routes-core.mjs"
 import { kvGet, kvSet } from "./kv.js"
 import { Jobs } from "./jobs.js"
@@ -23,7 +24,7 @@ let loading = null
 let market = null
 const jobs = new Jobs()
 
-const NO_DATA = "还没有游戏数据：装好油猴脚本后打开一次游戏页面（会自动读取），再刷新本页"
+const NO_DATA = () => t("还没有游戏数据：装好油猴脚本后打开一次游戏页面（会自动读取），再刷新本页")
 
 async function refreshMarket() {
   try {
@@ -69,7 +70,7 @@ function ensureEngine() {
       const r = await fetch(`${BASE}data/gamedata.json`).catch(() => null)
       env = r?.ok ? await r.json() : null
     }
-    if (!env) throw new Error(NO_DATA)
+    if (!env) throw new Error(NO_DATA())
     market = await kvGet("market")
     if (!market || Date.now() / 1000 - market.timestamp > 1800) await refreshMarket()
     return useGameData(env)
@@ -88,6 +89,7 @@ async function applyEnvelope(env) {
 }
 
 export async function localApi(method, p, body = {}) {
+  if (p === "/api/lang" && method === "PUT") return { lang: setLang(body.lang) }
   if (p === "/api/state" && method === "GET") {
     return {
       team: await kvGet("team", EMPTY_TEAM),
@@ -108,7 +110,7 @@ export async function localApi(method, p, body = {}) {
     const env = body.gameDataRaw ? decodeGameData(body.gameDataRaw) : null
     await applyEnvelope(env)
     const team = teamFromSite(body)
-    team.dtoCheck = { summary: "浏览器版不核对", ok: null }
+    team.dtoCheck = { summary: t("浏览器版不核对"), ok: null }
     await kvSet("team", team)
     return { ok: true, members: team.members.length, gameData: !!env, dtoCheck: team.dtoCheck }
   }

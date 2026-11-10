@@ -5,6 +5,7 @@
 // each life skill's drink slots (× drink concentration) and community buffs.
 import { emptyPlayer, importMember } from "../import.mjs"
 import { LIFE_SKILLS, isGathering, normalizeCraftCfg } from "./craft.mjs"
+import { t } from "../lang.mjs"
 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
 const list = v => (Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : [])
@@ -101,7 +102,7 @@ export function gameModeOf(e) {
 export function ironcowFromGame(m, payload, prev) {
   const team = prev && Array.isArray(prev.members) ? JSON.parse(JSON.stringify(prev)) : { members: [], selected: [] }
   const name = String(payload?.character?.name || "").trim()
-  if (!name) throw new Error("没有读到角色名")
+  if (!name) throw new Error(t("没有读到角色名"))
   const old = team.members.find(p => p.name === name)
   const id = old?.id ?? Math.max(0, ...team.members.map(p => Number(p.id) || 0)) + 1
   const p = importMember(m, payload, emptyPlayer(id, m.$e))

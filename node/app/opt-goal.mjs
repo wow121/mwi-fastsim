@@ -16,10 +16,13 @@ import { seedList } from "./evaluator.mjs"
 import { GearPrices, guildSlots, memberSlots, pricedBook, SKILL_ZH } from "./opt-upgrades.mjs"
 import { optimizeConsumables } from "./opt-consumables.mjs"
 import { zh } from "./i18n.mjs"
+import { getLang, t } from "./lang.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const INF = Number.POSITIVE_INFINITY
 const M = v => (Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : `${(v / 1e6).toFixed(1)}M`)
+const COMMA = () => (getLang() === "en" ? ", " : "，") // i18n-ok
+const skillName = s => t(SKILL_ZH[s])
 const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
 export { SKILL_ZH }
 
@@ -38,7 +41,7 @@ export async function planGoal(ev, params, api) {
   const useConsumables = params.consumables !== false
   const budget = members.map((_, k) => Math.max(0, Number(params.budgets?.[k] || 0)))
   const other = members.map((_, k) => Number(params.otherIncomes?.[k] || 0))
-  const name = k => members[k].name || `队员${k + 1}`
+  const name = k => members[k].name || t("队员{n}", { n: k + 1 })
   const maps = ev.ctx.m.$e
   const xpTable = maps.levelExperienceTable || []
   const gp = new GearPrices(maps, pricedBook(ev.ctx.book, params), tax, { refinedResale: params.refinedResale })
@@ -49,11 +52,11 @@ export async function planGoal(ev, params, api) {
   const verify = { hours: 24, seeds: seedList(70707, 48) }
   // memoized: attempts at different T share many configurations
   const memo = new Map()
-  const run = (mem, t, cfg) => {
-    const text = JSON.stringify([mem, t, cfg.hours, cfg.seeds])
+  const run = (mem, tg, cfg) => {
+    const text = JSON.stringify([mem, tg, cfg.hours, cfg.seeds])
     const key = `${hash53(text)}:${hash53(text, 7)}:${text.length}`
     if (!memo.has(key)) {
-      const p = ev.evaluate(mem, t, { ...cfg, extra, objective: "profit", signal: api.signal })
+      const p = ev.evaluate(mem, tg, { ...cfg, extra, objective: "profit", signal: api.signal })
       p.catch(() => memo.delete(key))
       memo.set(key, p)
     }
@@ -66,11 +69,11 @@ export async function planGoal(ev, params, api) {
 
   const now = stat(await run(members, params.current, long))
   const ref = now.profit
-  api.log(`现在：${M(now.profit)}/天，死亡 ${now.deaths.toFixed(2)}/小时`)
+  api.log(t("现在：{p}/天，死亡 {d}/小时", { p: M(now.profit), d: now.deaths.toFixed(2) }))
   const start = stat(await run(members, goal, long))
-  api.log(`直接去目标：${M(start.profit)}/天，死亡 ${start.deaths.toFixed(2)}/小时`)
+  api.log(t("直接去目标：{p}/天，死亡 {d}/小时", { p: M(start.profit), d: start.deaths.toFixed(2) }))
   const income = members.map((_, k) => now.players[k].profit + other[k])
-  members.forEach((c, k) => api.log(`  ${name(k)} 经验/天：${SKILLS.map(s => `${SKILL_ZH[s]} Lv.${c.levels?.[s]} ${M(now.players[k].xp[s])}`).join("，")}${c.experience ? "" : "（没有当前经验数据，按整级算）"}`))
+  members.forEach((c, k) => api.log(t("  {who} 经验/天：{list}", { who: name(k), list: SKILLS.map(s => `${skillName(s)} Lv.${c.levels?.[s]} ${M(now.players[k].xp[s])}`).join(COMMA()) }) + (c.experience ? "" : t("（没有当前经验数据，按整级算）"))))
   const perDay = k => Math.max(income[k], 1e6) // coins -> days of the character's own income
 
   // consumables on the target (item swap + triggers), before any upgrade
@@ -79,16 +82,16 @@ export async function planGoal(ev, params, api) {
   const tuneConsumables = async (label, guard, after) => {
     if (!useConsumables) return
     const before = members
-    api.log(`${label}：在目标上优化药品`)
+    api.log(t("{label}：在目标上优化药品", { label }))
     const res = await optimizeConsumables(ev, { members: config(), target: goal, extra, objective: "profit", rounds: 1, swapItems: true, optimize }, nestedApi(api, after, {
-      progress: (d, t, s) => api.progress(d, t, `药品 · ${s}`), log: m => api.log(`  [药品] ${m}`), partial: () => {},
+      progress: (d, tot, s) => api.progress(d, tot, t("药品 · {s}", { s })), log: msg => api.log(t("  [药品] {msg}", { msg })), partial: () => {},
     }))
     if (res.unchanged) return
     // keep food / drinks / consumable triggers, not the (temporary) upgrades inside config()
     members = members.map((c, k) => ({ ...c, food: res.members[k].food, drinks: res.members[k].drinks, triggerMap: { ...(c.triggerMap || {}), ...pickItems(res.members[k].triggerMap) } }))
     if (guard && !(await guard())) {
       members = before
-      api.log("  [药品] 调整后不再达标（死亡变多），撤回")
+      api.log(t("  [药品] 调整后不再达标（死亡变多），撤回"))
       return
     }
     for (const ch of res.changes) consumableChanges.push({ ...ch, memberName: name(ch.member), when: label })
@@ -103,8 +106,8 @@ export async function planGoal(ev, params, api) {
   if (params.guild) {
     for (const g of guildSlots(maps, members, { maxGuildUp: params.maxGuildUp ?? 5 })) {
       slots.push({
-        key: g.key, member: -1, memberName: "全队（公会）", slotName: `公会·${g.name}`, states: g.states, guild: true,
-        trans: (a, b) => (b.level > a.level ? { cost: 0, how: `公会加成升到 ${b.level} 级（${g.costText(b.level)}）` } : { cost: INF, how: "" }),
+        key: g.key, member: -1, memberName: t("全队（公会）"), slotName: t("公会·{name}", { name: g.name }), states: g.states, guild: true,
+        trans: (a, b) => (b.level > a.level ? { cost: 0, how: t("公会加成升到 {lv} 级（{cost}）", { lv: b.level, cost: g.costText(b.level) }) } : { cost: INF, how: "" }),
         value: () => 0,
       })
     }
@@ -136,7 +139,7 @@ export async function planGoal(ev, params, api) {
     mem.forEach((c, k) => { c.levels = { ...c.levels, ...lv[k] } })
     return mem
   }
-  api.log(`${slots.length} 个装备 / 技能书 / 房子${params.guild ? " / 公会" : ""}位置可提升${useLevels ? "，另加战斗等级" : ""}`)
+  api.log((params.guild ? t("{n} 个装备 / 技能书 / 房子 / 公会位置可提升", { n: slots.length }) : t("{n} 个装备 / 技能书 / 房子位置可提升", { n: slots.length })) + (useLevels ? t("，另加战斗等级") : ""))
 
   // sim-hours still ahead: attempts of at least 8 greedy steps (the step count varies a lot), 3 bisection
   // attempts after the grid, then the finish. A step's work and the consumables' are guesses (a step screens
@@ -160,7 +163,7 @@ export async function planGoal(ev, params, api) {
   const charmWork = useLevels && params.charms !== false ? optimize.length * SKILLS.length * 6 * cost(main) : 0
   api.remaining?.(consWork + charmWork + ahead(grid.length + 3))
   const w0 = work()
-  await tuneConsumables("开始", null, charmWork + ahead(grid.length + 3))
+  await tuneConsumables(t("开始"), null, charmWork + ahead(grid.length + 3))
   if (useConsumables && work() > w0) consWork = work() - w0
   const ok = st => st.deaths <= maxDeaths + 1e-9 && st.profit > ref
   const fmtT = T => (Number.isInteger(T) ? String(T) : T.toFixed(1))
@@ -178,9 +181,9 @@ export async function planGoal(ev, params, api) {
     const jobs = []
     for (const k of optimize) {
       const cur = members[k].equipment?.charm?.itemHrid || ""
-      const list = [{ hrid: cur, label: cur ? `${nm(cur)}（现在戴的）` : "不戴护符（现在）", cost: 0, rates: now.players[k].xp, current: true }]
-      for (const sk of SKILLS) for (const t of TIERS) {
-        const h = `/items/${t}_${sk}_charm`
+      const list = [{ hrid: cur, label: cur ? t("{name}（现在戴的）", { name: nm(cur) }) : t("不戴护符（现在）"), cost: 0, rates: now.players[k].xp, current: true }]
+      for (const sk of SKILLS) for (const tier of TIERS) {
+        const h = `/items/${tier}_${sk}_charm`
         const it = maps.itemDetailMap[h]
         if (!it || h === cur) continue
         const req = it.equipmentDetail?.levelRequirements || []
@@ -199,11 +202,11 @@ export async function planGoal(ev, params, api) {
       const mem = clone(members)
       mem[k].equipment = { ...mem[k].equipment, charm: { itemHrid: o.hrid, enhancementLevel: 0 } }
       o.rates = stat(await run(mem, params.current, main)).players[k].xp
-      api.progress(++done, jobs.length, "护符经验")
+      api.progress(++done, jobs.length, t("护符经验"))
     })
     for (const k of optimize) {
       const best = SKILLS.map(sk => charmOpts[k].reduce((a, o) => (o.rates[sk] > a.rates[sk] ? o : a)))
-      api.log(`  ${name(k)} 各技能最快的护符：${SKILLS.filter(sk => now.players[k].xp[sk] > 0).map((sk, i) => `${SKILL_ZH[sk]} ${M(best[SKILLS.indexOf(sk)].rates[sk])}/天`).join("，")}`)
+      api.log(t("  {who} 各技能最快的护符：{list}", { who: name(k), list: SKILLS.filter(sk => now.players[k].xp[sk] > 0).map((sk, i) => t("{skill} {v}/天", { skill: skillName(sk), v: M(best[SKILLS.indexOf(sk)].rates[sk]) })).join(COMMA()) }))
     }
   }
   // one attempt: from scratch, with T days of cash / income / experience; greedy on the target
@@ -252,11 +255,11 @@ export async function planGoal(ev, params, api) {
           const key = JSON.stringify(nl)
           if (seen.has(key) || spent[k] + o.cost > budgetAt(k, T)) continue
           seen.add(key)
-          cands.push({ kind: "charm", member: k, c, levels: nl, cost: o.cost, how: `刷经验时戴 ${o.label}`, days: o.cost / perDay(k) })
+          cands.push({ kind: "charm", member: k, c, levels: nl, cost: o.cost, how: t("刷经验时戴 {charm}", { charm: o.label }), days: o.cost / perDay(k) })
         }
       }
       if (!cands.length) {
-        why = "预算内没有可买的"
+        why = t("预算内没有可买的")
         break
       }
       // deaths phase: fewer deaths first, but profit (a smooth number) keeps the search moving when
@@ -280,7 +283,7 @@ export async function planGoal(ev, params, api) {
         const b = stat(await run(config(), goal, quick))
         const pre = await pool(cands, 48, async c => {
           const st = stat(await run(tryCand(c), goal, quick))
-          api.progress(++done, cands.length, `试 ${fmtT(T)} 天 · 预筛`)
+          api.progress(++done, cands.length, t("试 {T} 天 · 预筛", { T: fmtT(T) }))
           return { c, g: score(st, b) }
         })
         short = pre.sort((x, y) => y.g - x.g).slice(0, 40).map(x => x.c)
@@ -291,7 +294,7 @@ export async function planGoal(ev, params, api) {
         done = 0
         return pool(list, 48, async c => {
           const st = stat(await run(tryCand(c), goal, screen))
-          api.progress(++done, list.length, `试 ${fmtT(T)} 天 · 粗筛（${phase === "deaths" ? "减少死亡" : "提高利润"}）`)
+          api.progress(++done, list.length, t("试 {T} 天 · 粗筛（{phase}）", { T: fmtT(T), phase: phase === "deaths" ? t("减少死亡") : t("提高利润") }))
           return { ...c, gain: score(st, base0) }
         })
       }
@@ -305,7 +308,7 @@ export async function planGoal(ev, params, api) {
       // review the best per day and the biggest effects (cheap winners are often noise)
       const top = [...new Set([...[...pos].sort((a, b) => rate(b) - rate(a)).slice(0, 8), ...[...pos].sort((a, b) => b.gain - a.gain).slice(0, 8)])]
       if (!top.length) {
-        why = `粗筛没有能改善的（${short.length} 个候选）`
+        why = t("粗筛没有能改善的（{n} 个候选）", { n: short.length })
         break
       }
       // compare against the current config on the same seeds
@@ -314,7 +317,7 @@ export async function planGoal(ev, params, api) {
       done = 0
       const fine = await pool(top, 16, async c => {
         const st = stat(await run(tryCand(c), goal, fineCfg))
-        api.progress(++done, top.length, `试 ${fmtT(T)} 天 · 复核`)
+        api.progress(++done, top.length, t("试 {T} 天 · 复核", { T: fmtT(T) }))
         return { ...c, st, gain: score(st, base1) }
       })
       let best = fine.filter(c => c.gain > 0).sort((a, b) => rate(b) - rate(a))[0]
@@ -329,40 +332,46 @@ export async function planGoal(ev, params, api) {
           if (c.member >= 0) cost[c.member] += c.cost
         }
         if (bundle.length < 2) {
-          why = "复核后单项都没改善"
+          why = t("复核后单项都没改善")
           break
         }
         const mem = config()
         for (const c of bundle) applyState(mem, c.s, c.j)
         const st = stat(await run(mem, goal, fineCfg))
         if (!(score(st, base1) > 0)) {
-          why = "复核后单项和组合都没改善"
+          why = t("复核后单项和组合都没改善")
           break
         }
         for (const c of bundle.slice(0, -1)) {
           const sl = slots[c.s]
-          log.push({ T, memberName: sl.memberName, what: `${sl.slotName}：${sl.states[held[c.s]].label} → ${sl.states[c.j].label}`, cost: c.cost, days: c.days, how: `${c.how}（组合）`, phase, after: st })
+          log.push({ T, memberName: sl.memberName, what: t("{slot}：{from} → {to}", { slot: sl.slotName, from: sl.states[held[c.s]].label, to: sl.states[c.j].label }), cost: c.cost, days: c.days, how: t("{how}（组合）", { how: c.how }), phase, after: st })
           held[c.s] = c.j
           if (c.member >= 0) spent[c.member] += c.cost
         }
-        best = { ...bundle.at(-1), st, how: `${bundle.at(-1).how}（组合）` }
+        best = { ...bundle.at(-1), st, how: t("{how}（组合）", { how: bundle.at(-1).how }) }
       }
       if (best.kind === "charm") {
         const k = best.member
-        log.push({ T, memberName: name(k), what: `护符（刷经验时）：${charmOpts[k][charmSel[k]].label} → ${charmOpts[k][best.c].label}`, cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
+        log.push({ T, memberName: name(k), what: t("护符（刷经验时）：{from} → {to}", { from: charmOpts[k][charmSel[k]].label, to: charmOpts[k][best.c].label }), cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
         spent[k] += best.cost
         charmSel[k] = best.c
         lv[k] = { ...lv[k], ...best.levels }
       } else {
         const sl = slots[best.s]
-        log.push({ T, memberName: sl.memberName, what: `${sl.slotName}：${sl.states[held[best.s]].label} → ${sl.states[best.j].label}`, cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
+        log.push({ T, memberName: sl.memberName, what: t("{slot}：{from} → {to}", { slot: sl.slotName, from: sl.states[held[best.s]].label, to: sl.states[best.j].label }), cost: best.cost, days: best.days, how: best.how, phase, after: best.st })
         held[best.s] = best.j
         if (best.member >= 0) spent[best.member] += best.cost
       }
       curMain = best.st
     }
     const last = checked || curMain
-    api.log(`试 ${fmtT(T)} 天（可花 ${optimize.map(k => `${name(k)} ${M(budgetAt(k, T))}`).join("，")}${useLevels ? `；等级 ${optimize.map(k => SKILLS.filter(s => lv[k][s] > lv0[k][s]).map(s => `${SKILL_ZH[s]}+${lv[k][s] - lv0[k][s]}`).join("/") || "不变").join("，")}` : ""}）：${checked ? "能达标" : `达不到${why ? `（${why}）` : ""}`}，${log.length} 步，死亡 ${last.deaths.toFixed(3)}/小时，${M(last.profit)}/天`)
+    api.log(t("试 {T} 天（可花 {cash}{levels}）：{verdict}，{n} 步，死亡 {d}/小时，{p}/天", {
+      T: fmtT(T),
+      cash: optimize.map(k => `${name(k)} ${M(budgetAt(k, T))}`).join(COMMA()),
+      levels: useLevels ? t("；等级 {list}", { list: optimize.map(k => SKILLS.filter(s => lv[k][s] > lv0[k][s]).map(s => `${skillName(s)}+${lv[k][s] - lv0[k][s]}`).join("/") || t("不变")).join(COMMA()) }) : "",
+      verdict: checked ? t("能达标") : t("达不到") + (why ? t("（{why}）", { why }) : ""),
+      n: log.length, d: last.deaths.toFixed(3), p: M(last.profit),
+    }))
     measured.attempts++
     measured.steps += log.length + 1 // the last step screens too, then stops
     measured.work += work() - w0
@@ -409,7 +418,7 @@ export async function planGoal(ev, params, api) {
   let fresh = null
   if (checked) {
     api.remaining?.(finishWork(), { measured: true }) // counted, not guessed: no calibration
-    await tuneConsumables("达标后", async () => {
+    await tuneConsumables(t("达标后"), async () => {
       const st = stat(await run(config(), goal, long))
       if (ok(st)) cur = st
       return ok(st)
@@ -449,7 +458,7 @@ export async function planGoal(ev, params, api) {
         }
         lv[u.k][u.s] = hi
       }
-      api.progress(x + 1, undo.length, "精简")
+      api.progress(x + 1, undo.length, t("精简"))
     }
     cur = stat(await run(config(), goal, long))
     // Every step above (and the greedy search) was decided on the same 12 runs, so what is left
@@ -457,7 +466,7 @@ export async function planGoal(ev, params, api) {
     // runs no step has seen; if it fails there, go back to the state before trimming.
     fresh = stat(await run(config(), goal, verify))
     if (!ok(fresh) && removed.length + optimize.reduce((a, k) => a + SKILLS.filter(s => lv[k][s] !== before.lv[k][s]).length, 0) > 0) {
-      api.log(`精简后的方案换一组随机战斗没达标（死亡 ${fresh.deaths.toFixed(3)}/小时，${M(fresh.profit)}/天），退回精简前`)
+      api.log(t("精简后的方案换一组随机战斗没达标（死亡 {d}/小时，{p}/天），退回精简前", { d: fresh.deaths.toFixed(3), p: M(fresh.profit) }))
       before.held.forEach((j, s) => { held[s] = j })
       before.lv.forEach((x, k) => { lv[k] = { ...x } })
       removed = []
@@ -494,16 +503,16 @@ export async function planGoal(ev, params, api) {
   held.forEach((j, s) => {
     if (!j) return
     const sl = slots[s]
-    const t = pay[s][0][j]
-    if (sl.guild) return changes.push({ kind: "guild", memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, to: sl.states[j].label, cost: 0, how: t.how })
-    perMember[sl.member].cost += t.cost
-    changes.push({ kind: "gear", memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, to: sl.states[j].label, cost: t.cost, how: t.how })
+    const tr = pay[s][0][j]
+    if (sl.guild) return changes.push({ kind: "guild", memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, to: sl.states[j].label, cost: 0, how: tr.how })
+    perMember[sl.member].cost += tr.cost
+    changes.push({ kind: "gear", memberName: sl.memberName, slotName: sl.slotName, from: sl.states[0].label, to: sl.states[j].label, cost: tr.cost, how: tr.how })
   })
   members.forEach((_, k) => {
     const o = charmOpts[k]?.[charmSel[k]]
     if (o && !o.current) {
       perMember[k].cost += o.cost
-      changes.push({ kind: "charm", memberName: name(k), slotName: "护符（刷经验时）", from: charmOpts[k][0].label, to: o.label, cost: o.cost, how: "买来戴着在现在的地方刷经验，练到需要的等级（到目标区域后可以换回）" })
+      changes.push({ kind: "charm", memberName: name(k), slotName: t("护符（刷经验时）"), from: charmOpts[k][0].label, to: o.label, cost: o.cost, how: t("买来戴着在现在的地方刷经验，练到需要的等级（到目标区域后可以换回）") })
     }
     perMember[k].charm = o ? o.label : null
   })
@@ -511,7 +520,7 @@ export async function planGoal(ev, params, api) {
     if (lv[k][s] <= lv0[k][s]) return
     const d = levelDays(k, s, lv[k][s])
     perMember[k].levelDays = Math.max(perMember[k].levelDays, d)
-    changes.push({ kind: "level", memberName: name(k), slotName: SKILL_ZH[s], from: `Lv.${lv0[k][s]}`, to: `Lv.${lv[k][s]}`, cost: 0, how: `现在的地方刷 ${d.toFixed(1)} 天（${M(rateOf(k, s))} 经验/天${charmOpts[k] && !charmOpts[k][charmSel[k]].current ? `，戴${charmOpts[k][charmSel[k]].label}` : ""}）`, days: d })
+    changes.push({ kind: "level", memberName: name(k), slotName: skillName(s), from: `Lv.${lv0[k][s]}`, to: `Lv.${lv[k][s]}`, cost: 0, how: t("现在的地方刷 {d} 天（{rate} 经验/天{charm}）", { d: d.toFixed(1), rate: M(rateOf(k, s)), charm: charmOpts[k] && !charmOpts[k][charmSel[k]].current ? t("，戴{charm}", { charm: charmOpts[k][charmSel[k]].label }) : "" }), days: d })
   }))
   for (const p of perMember) {
     p.saveDays = p.cost <= p.cash ? 0 : p.income > 0 ? (p.cost - p.cash) / p.income : null
@@ -519,11 +528,13 @@ export async function planGoal(ev, params, api) {
   }
   const reached = ok(cur)
   const readyDays = perMember.some(p => p.days == null) ? null : Math.max(0, ...perMember.map(p => p.days))
+  const doneVars = () => ({ p: M(cur.profit), ref: M(ref), d: cur.deaths.toFixed(3), n: changes.length, days: readyDays == null ? "?" : readyDays.toFixed(1) })
   api.log(reached
-    ? `达标${fresh ? "（换一组没用过的随机战斗验证过）" : ""}：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时；共 ${changes.length} 项，约 ${readyDays == null ? "?" : readyDays.toFixed(1)} 天能全部做完`
-    : `没能达标：目标 ${M(cur.profit)}/天（现在 ${M(ref)}/天），死亡 ${cur.deaths.toFixed(3)}/小时`)
+    ? (fresh ? t("达标（换一组没用过的随机战斗验证过）：目标 {p}/天（现在 {ref}/天），死亡 {d}/小时；共 {n} 项，约 {days} 天能全部做完", doneVars())
+      : t("达标：目标 {p}/天（现在 {ref}/天），死亡 {d}/小时；共 {n} 项，约 {days} 天能全部做完", doneVars()))
+    : t("没能达标：目标 {p}/天（现在 {ref}/天），死亡 {d}/小时", { p: M(cur.profit), ref: M(ref), d: cur.deaths.toFixed(3) }))
   const levelOptions = members.flatMap((c, k) => SKILLS.filter(s => now.players[k].xp[s] > 0).map(s => ({
-    memberName: name(k), skill: SKILL_ZH[s], level: lv0[k][s], perDay: now.players[k].xp[s], days1: levelDays(k, s, lv0[k][s] + 1, 0), days5: levelDays(k, s, lv0[k][s] + 5, 0),
+    memberName: name(k), skill: skillName(s), level: lv0[k][s], perDay: now.players[k].xp[s], days1: levelDays(k, s, lv0[k][s] + 1, 0), days5: levelDays(k, s, lv0[k][s] + 5, 0),
     ...(() => {
       if (!charmOpts[k]) return {}
       let c = 0

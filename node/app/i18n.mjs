@@ -5,6 +5,7 @@
 // extracted from the site's bundle.
 import names from "./zh-names.mjs"
 import game from "./zh-game.mjs"
+import { getLang } from "./lang.mjs"
 
 const { byName, byHrid } = names
 const OFFICIAL = Object.assign({}, ...Object.values(game))
@@ -59,12 +60,25 @@ const GUILD_ZH = {
   "/guild_buffs/spirit_combat": "生命与法力上限（公会）",
   "/guild_buffs/tempo_combat": "攻击与施法速度（公会）",
 }
+const GUILD_EN = {
+  "/guild_buffs/force_combat": "Damage (guild)",
+  "/guild_buffs/rarity_combat": "Rare find (guild)",
+  "/guild_buffs/scholar_combat": "Experience (guild)",
+  "/guild_buffs/spirit_combat": "Max HP & MP (guild)",
+  "/guild_buffs/tempo_combat": "Attack & cast speed (guild)",
+}
 export function guildBuffName(maps, hrid) {
+  if (getLang() === "en") return GUILD_EN[hrid] || maps.guildBuffDetailMap?.[hrid]?.name || nameOf(maps, hrid) || hrid
   return GUILD_ZH[hrid] || (zh(maps, hrid) !== hrid ? zh(maps, hrid) : maps.guildBuffDetailMap?.[hrid]?.name || hrid)
 }
 
+/** Display name of any hrid in the UI language: Chinese (see above), or in English the game's own name. */
 export function zh(maps, hrid) {
   if (!hrid) return ""
+  if (getLang() === "en") {
+    const en = nameOf(maps, hrid)
+    return SYMBOLS[en] || en || hrid
+  }
   if (OFFICIAL[hrid]) return SYMBOLS[OFFICIAL[hrid]] || OFFICIAL[hrid]
   if (byHrid[hrid]) return byHrid[hrid]
   const en = nameOf(maps, hrid)

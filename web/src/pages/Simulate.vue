@@ -3,6 +3,7 @@ import { computed, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
 import { COMBAT_SKILLS, attackName, call, ci, randomSeedBase, defaultExtra, defaultTarget, duration, int, itemName, money, monsterName, perDay, pct, qty, selectedMembers, store, targetLabel } from "../api.js"
 import { copyText, fileStamp, saveImage, stamp } from "../export.js"
+import { joinList, t } from "../i18n.js"
 import TargetPicker from "../components/TargetPicker.vue"
 import ExtraBuffs from "../components/ExtraBuffs.vue"
 
@@ -21,7 +22,7 @@ const members = computed(() => selectedMembers())
 const ran = ref(null)
 
 async function run() {
-  if (!members.value.length) return ElMessage.warning("先在“队伍”页勾选出战成员")
+  if (!members.value.length) return ElMessage.warning(t("先在“队伍”页勾选出战成员"))
   busy.value = true
   const t0 = performance.now()
   try {
@@ -104,152 +105,152 @@ const levels = computed(() => {
     const rate = p[`xp_${k}`] || 0
     const key = `${who.value}:${k}`
     const goal = Math.min(cap, Math.max(L + 1, goalLevel[key] ?? L + 1))
-    const t = to => (to <= L ? 0 : rate > 0 ? (table[to] - xp) / rate : Infinity)
-    return { key, label, level: L, progress: L >= cap ? 1 : (xp - table[L]) / (table[L + 1] - table[L]), rate, next: L >= cap ? null : t(L + 1), goal, toGoal: L >= cap ? null : t(goal), exact: Number.isFinite(e), cap }
+    const hoursTo = to => (to <= L ? 0 : rate > 0 ? (table[to] - xp) / rate : Infinity)
+    return { key, label: t(label), level: L, progress: L >= cap ? 1 : (xp - table[L]) / (table[L + 1] - table[L]), rate, next: L >= cap ? null : hoursTo(L + 1), goal, toGoal: L >= cap ? null : hoursTo(goal), exact: Number.isFinite(e), cap }
   })
 })
 
 // ---- export
 function summary() {
   const r = ran.value
-  const lines = [`【模拟】${targetLabel(r.target)}（${r.hours} 小时 × ${r.seeds} 次，${stamp()}）`]
+  const lines = [t("【模拟】{target}（{h} 小时 × {n} 次，{time}）", { target: targetLabel(r.target), h: r.hours, n: r.seeds, time: stamp() })]
   const m = res.value.mean
-  lines.push(`全队：利润 ${perDay(m.profitPerHour)}/天（中值 ${perDay(m.profitMidpointPerHour)}/天），经验 ${int(m.xpPerHour)}/小时，遭遇 ${m.encountersPerHour.toFixed(1)}/小时，死亡 ${m.deathsPerHour.toFixed(2)}${ci(m, "deathsPerHour")}/小时`)
+  lines.push(t("全队：利润 {profit}/天（中值 {mid}/天），经验 {xp}/小时，遭遇 {enc}/小时，死亡 {deaths}/小时", { profit: perDay(m.profitPerHour), mid: perDay(m.profitMidpointPerHour), xp: int(m.xpPerHour), enc: m.encountersPerHour.toFixed(1), deaths: m.deathsPerHour.toFixed(2) + ci(m, "deathsPerHour") }))
   for (const p of rows.value)
-    lines.push(`· ${p.name}：利润 ${perDay(p.profitPerHour)}/天，收入 ${perDay(p.revenuePerHour)}/天，消耗 ${perDay(p.expensesPerHour)}/天，经验 ${int(p.xpPerHour)}/小时，死亡 ${p.deathsPerHour.toFixed(2)}/小时，空蓝 ${pct(p.outOfManaTimeRatio)}`)
+    lines.push(t("· {name}：利润 {profit}/天，收入 {rev}/天，消耗 {exp}/天，经验 {xp}/小时，死亡 {deaths}/小时，空蓝 {oom}", { name: p.name, profit: perDay(p.profitPerHour), rev: perDay(p.revenuePerHour), exp: perDay(p.expensesPerHour), xp: int(p.xpPerHour), deaths: p.deathsPerHour.toFixed(2), oom: pct(p.outOfManaTimeRatio) }))
   return lines.join("\n")
 }
 </script>
 
 <template>
   <div class="page">
-    <h2>模拟</h2>
+    <h2>{{ t("模拟") }}</h2>
     <el-card>
       <div class="row" style="margin-bottom: 8px"><TargetPicker v-model="target" /></div>
       <div class="row" style="margin-bottom: 8px"><ExtraBuffs v-model="extra" /></div>
       <div class="row">
-        <span class="muted">时长（小时）</span><el-input-number v-model="hours" :min="1" :max="720" size="small" />
-        <span class="muted">重复次数（不同种子，取平均）</span><el-input-number v-model="seeds" :min="1" :max="64" size="small" />
-        <el-tooltip content="默认每次用同一组随机战斗，重跑结果不变；勾上后换一组，用来检查结果是否稳定" placement="top"><el-checkbox v-model="reseed" size="small">换一组随机种子</el-checkbox></el-tooltip>
-        <el-button type="primary" :loading="busy" @click="run">开始模拟</el-button>
-        <span v-if="res" class="muted">{{ ran.seeds }} × {{ ran.hours }} 小时，用时 {{ (ms / 1000).toFixed(2) }} 秒</span>
+        <span class="muted">{{ t("时长（小时）") }}</span><el-input-number v-model="hours" :min="1" :max="720" size="small" />
+        <span class="muted">{{ t("重复次数（不同种子，取平均）") }}</span><el-input-number v-model="seeds" :min="1" :max="64" size="small" />
+        <el-tooltip :content="t('默认每次用同一组随机战斗，重跑结果不变；勾上后换一组，用来检查结果是否稳定')" placement="top"><el-checkbox v-model="reseed" size="small">{{ t("换一组随机种子") }}</el-checkbox></el-tooltip>
+        <el-button type="primary" :loading="busy" @click="run">{{ t("开始模拟") }}</el-button>
+        <span v-if="res" class="muted">{{ t("{n} × {h} 小时，用时 {s} 秒", { n: ran.seeds, h: ran.hours, s: (ms / 1000).toFixed(2) }) }}</span>
         <template v-if="res">
-          <el-button size="small" @click="copyText(summary())">复制文字</el-button>
-          <el-button size="small" @click="saveImage(out, `模拟-${fileStamp()}`)">保存图片</el-button>
+          <el-button size="small" @click="copyText(summary())">{{ t("复制文字") }}</el-button>
+          <el-button size="small" @click="saveImage(out, `${t('模拟')}-${fileStamp()}`)">{{ t("保存图片") }}</el-button>
         </template>
       </div>
-      <div class="muted" style="margin-top: 6px">成员：{{ members.map(m => m.name).join("、") || "未选择" }}</div>
+      <div class="muted" style="margin-top: 6px">{{ t("成员：") }}{{ joinList(members.map(m => m.name)) || t("未选择") }}</div>
     </el-card>
 
     <div v-if="res" ref="out">
       <el-card>
-        <template #header><b>全队</b><span class="muted" style="margin-left: 8px">{{ targetLabel(ran.target) }} · {{ ran.hours }} 小时 × {{ ran.seeds }} 次{{ ran.seedBase ? "（换过随机种子）" : "" }} · ± 是 95% 范围</span></template>
+        <template #header><b>{{ t("全队") }}</b><span class="muted" style="margin-left: 8px">{{ targetLabel(ran.target) }} · {{ t("{h} 小时 × {n} 次", { h: ran.hours, n: ran.seeds }) }}{{ ran.seedBase ? t("（换过随机种子）") : "" }} · {{ t("± 是 95% 范围") }}</span></template>
         <div class="row" style="gap: 32px">
-          <div>利润（下限）<div style="font-size: 22px">{{ perDay(res.mean.profitPerHour) }}/天 <span class="muted">{{ ci(res.mean, "profitPerHour", v => money(v * 24)) }}</span></div></div>
-          <div>利润（中值）<div style="font-size: 22px">{{ perDay(res.mean.profitMidpointPerHour) }}/天</div></div>
-          <div>经验<div style="font-size: 22px">{{ int(res.mean.xpPerHour) }}/小时</div></div>
-          <div>遭遇<div style="font-size: 22px">{{ res.mean.encountersPerHour.toFixed(1) }}/小时</div></div>
-          <div>死亡<div style="font-size: 22px"><span :class="{ bad: res.mean.deathsPerHour > 0 }">{{ res.mean.deathsPerHour.toFixed(2) }}/小时</span> <span class="muted">{{ ci(res.mean, "deathsPerHour") }}</span></div></div>
+          <div>{{ t("利润（下限）") }}<div style="font-size: 22px">{{ perDay(res.mean.profitPerHour) }}{{ t("/天") }} <span class="muted">{{ ci(res.mean, "profitPerHour", v => money(v * 24)) }}</span></div></div>
+          <div>{{ t("利润（中值）") }}<div style="font-size: 22px">{{ perDay(res.mean.profitMidpointPerHour) }}{{ t("/天") }}</div></div>
+          <div>{{ t("经验") }}<div style="font-size: 22px">{{ int(res.mean.xpPerHour) }}{{ t("/小时") }}</div></div>
+          <div>{{ t("遭遇") }}<div style="font-size: 22px">{{ res.mean.encountersPerHour.toFixed(1) }}{{ t("/小时") }}</div></div>
+          <div>{{ t("死亡") }}<div style="font-size: 22px"><span :class="{ bad: res.mean.deathsPerHour > 0 }">{{ res.mean.deathsPerHour.toFixed(2) }}{{ t("/小时") }}</span> <span class="muted">{{ ci(res.mean, "deathsPerHour") }}</span></div></div>
         </div>
       </el-card>
       <el-card>
-        <template #header><b>成员</b></template>
+        <template #header><b>{{ t("成员") }}</b></template>
         <el-table :data="rows" size="small">
-          <el-table-column prop="name" label="角色" />
-          <el-table-column label="经验/小时" align="right"><template #default="{ row }">{{ int(row.xpPerHour) }}</template></el-table-column>
-          <el-table-column label="收入/天" align="right"><template #default="{ row }">{{ perDay(row.revenuePerHour) }}</template></el-table-column>
-          <el-table-column label="消耗/天" align="right"><template #default="{ row }">{{ perDay(row.expensesPerHour) }}</template></el-table-column>
-          <el-table-column label="利润下限/天" align="right"><template #default="{ row }">{{ perDay(row.profitPerHour) }}</template></el-table-column>
-          <el-table-column label="利润上限/天" align="right"><template #default="{ row }">{{ perDay(row.profitUpperPerHour) }}</template></el-table-column>
-          <el-table-column label="死亡/小时" align="right"><template #default="{ row }">{{ row.deathsPerHour.toFixed(2) }}</template></el-table-column>
-          <el-table-column label="空蓝时间" align="right"><template #default="{ row }">{{ pct(row.outOfManaTimeRatio) }}</template></el-table-column>
+          <el-table-column prop="name" :label="t('角色')" />
+          <el-table-column :label="t('经验/小时')" align="right"><template #default="{ row }">{{ int(row.xpPerHour) }}</template></el-table-column>
+          <el-table-column :label="t('收入/天')" align="right"><template #default="{ row }">{{ perDay(row.revenuePerHour) }}</template></el-table-column>
+          <el-table-column :label="t('消耗/天')" align="right"><template #default="{ row }">{{ perDay(row.expensesPerHour) }}</template></el-table-column>
+          <el-table-column :label="t('利润下限/天')" align="right"><template #default="{ row }">{{ perDay(row.profitPerHour) }}</template></el-table-column>
+          <el-table-column :label="t('利润上限/天')" align="right"><template #default="{ row }">{{ perDay(row.profitUpperPerHour) }}</template></el-table-column>
+          <el-table-column :label="t('死亡/小时')" align="right"><template #default="{ row }">{{ row.deathsPerHour.toFixed(2) }}</template></el-table-column>
+          <el-table-column :label="t('空蓝时间')" align="right"><template #default="{ row }">{{ pct(row.outOfManaTimeRatio) }}</template></el-table-column>
         </el-table>
       </el-card>
       <el-card>
         <template #header>
-          <div class="row"><b>明细</b><span class="muted">（第一次模拟，{{ detailHours.toFixed(0) }} 小时）</span>
+          <div class="row"><b>{{ t("明细") }}</b><span class="muted">{{ t("（第一次模拟，{h} 小时）", { h: detailHours.toFixed(0) }) }}</span>
             <el-radio-group v-model="who" size="small"><el-radio-button v-for="(m, i) in runMembers" :key="i" :value="i">{{ m.name }}</el-radio-button></el-radio-group>
           </div>
         </template>
         <div class="grid">
           <div>
-            <b>伤害</b>
+            <b>{{ t("伤害") }}</b>
             <el-table :data="damage" size="small" max-height="360">
-              <el-table-column prop="name" label="来源" />
+              <el-table-column prop="name" :label="t('来源')" />
               <el-table-column label="DPS" align="right"><template #default="{ row }">{{ row.dps.toFixed(1) }}</template></el-table-column>
-              <el-table-column label="命中率" align="right"><template #default="{ row }">{{ pct(row.hits / Math.max(1, row.hits + row.miss)) }}</template></el-table-column>
-              <el-table-column label="次数" align="right"><template #default="{ row }">{{ int(row.hits + row.miss) }}</template></el-table-column>
+              <el-table-column :label="t('命中率')" align="right"><template #default="{ row }">{{ pct(row.hits / Math.max(1, row.hits + row.miss)) }}</template></el-table-column>
+              <el-table-column :label="t('次数')" align="right"><template #default="{ row }">{{ int(row.hits + row.miss) }}</template></el-table-column>
             </el-table>
           </div>
           <div>
-            <b>击杀/小时</b>
+            <b>{{ t("击杀/小时") }}</b>
             <el-table :data="kills" size="small" max-height="360">
-              <el-table-column prop="name" label="怪物" />
-              <el-table-column label="每小时" align="right"><template #default="{ row }">{{ row.perHour.toFixed(1) }}</template></el-table-column>
+              <el-table-column prop="name" :label="t('怪物')" />
+              <el-table-column :label="t('每小时')" align="right"><template #default="{ row }">{{ row.perHour.toFixed(1) }}</template></el-table-column>
             </el-table>
           </div>
           <div>
-            <b>收入（按买一价）</b>
+            <b>{{ t("收入（按买一价）") }}</b>
             <el-table :data="res.detail.players[who]?.revenueItems.slice(0, 20)" size="small" max-height="360">
-              <el-table-column label="物品"><template #default="{ row }">{{ itemName(row.itemHrid) }}</template></el-table-column>
-              <el-table-column label="数量/天" align="right"><template #default="{ row }">{{ qty(row.amount / detailHours * 24) }}</template></el-table-column>
-              <el-table-column label="价值/天" align="right"><template #default="{ row }">{{ money(row.total / detailHours * 24) }}</template></el-table-column>
+              <el-table-column :label="t('物品')"><template #default="{ row }">{{ itemName(row.itemHrid) }}</template></el-table-column>
+              <el-table-column :label="t('数量/天')" align="right"><template #default="{ row }">{{ qty(row.amount / detailHours * 24) }}</template></el-table-column>
+              <el-table-column :label="t('价值/天')" align="right"><template #default="{ row }">{{ money(row.total / detailHours * 24) }}</template></el-table-column>
             </el-table>
           </div>
           <div>
-            <b>消耗（按卖价）</b>
+            <b>{{ t("消耗（按卖价）") }}</b>
             <el-table :data="res.detail.players[who]?.expenseItems" size="small" max-height="360">
-              <el-table-column label="物品"><template #default="{ row }">{{ itemName(row.itemHrid) }}</template></el-table-column>
-              <el-table-column label="数量/天" align="right"><template #default="{ row }">{{ qty(row.amount / detailHours * 24) }}</template></el-table-column>
-              <el-table-column label="花费/天" align="right"><template #default="{ row }">{{ money(row.total / detailHours * 24) }}</template></el-table-column>
+              <el-table-column :label="t('物品')"><template #default="{ row }">{{ itemName(row.itemHrid) }}</template></el-table-column>
+              <el-table-column :label="t('数量/天')" align="right"><template #default="{ row }">{{ qty(row.amount / detailHours * 24) }}</template></el-table-column>
+              <el-table-column :label="t('花费/天')" align="right"><template #default="{ row }">{{ money(row.total / detailHours * 24) }}</template></el-table-column>
             </el-table>
           </div>
         </div>
       </el-card>
       <el-card>
         <template #header>
-          <div class="row"><b>死亡分析</b><span class="muted">（第一次模拟，{{ detailHours.toFixed(0) }} 小时；全队死亡 {{ int(teamDeaths) }} 次）</span>
+          <div class="row"><b>{{ t("死亡分析") }}</b><span class="muted">{{ t("（第一次模拟，{h} 小时；全队死亡 {n} 次）", { h: detailHours.toFixed(0), n: int(teamDeaths) }) }}</span>
             <el-radio-group v-model="who" size="small"><el-radio-button v-for="(m, i) in runMembers" :key="i" :value="i">{{ m.name }}</el-radio-button></el-radio-group>
           </div>
         </template>
         <div class="muted" style="margin-bottom: 8px">
-          <template v-if="deaths.total">死亡 {{ int(deaths.total) }} 次<template v-if="deaths.recorded">，其中 {{ int(deaths.outOfMana) }} 次死时空蓝</template>。</template>
-          <template v-else>这次模拟里没有死亡<template v-if="res.mean.players[who]?.deathsPerHour > 0">（平均每小时 {{ res.mean.players[who].deathsPerHour.toFixed(2) }} 次，可以加长时长再看）</template>。</template>
-          <template v-if="!deaths.recorded">本地服务需要重新编译引擎后才有致命一击记录。</template>
+          <template v-if="deaths.total">{{ t("死亡 {n} 次", { n: int(deaths.total) }) }}<template v-if="deaths.recorded">{{ t("，其中 {n} 次死时空蓝", { n: int(deaths.outOfMana) }) }}</template>{{ t("。") }}</template>
+          <template v-else>{{ t("这次模拟里没有死亡") }}<template v-if="res.mean.players[who]?.deathsPerHour > 0">{{ t("（平均每小时 {n} 次，可以加长时长再看）", { n: res.mean.players[who].deathsPerHour.toFixed(2) }) }}</template>{{ t("。") }}</template>
+          <template v-if="!deaths.recorded">{{ t("本地服务需要重新编译引擎后才有致命一击记录。") }}</template>
         </div>
         <div class="grid">
           <div v-if="deaths.causes.length">
-            <b>致命一击</b>
+            <b>{{ t("致命一击") }}</b>
             <el-table :data="deaths.causes" size="small" max-height="360">
-              <el-table-column prop="name" label="来源" min-width="160" />
-              <el-table-column label="次数" align="right"><template #default="{ row }">{{ int(row.n) }}</template></el-table-column>
-              <el-table-column label="占比" align="right"><template #default="{ row }">{{ pct(row.n / deaths.total) }}</template></el-table-column>
+              <el-table-column prop="name" :label="t('来源')" min-width="160" />
+              <el-table-column :label="t('次数')" align="right"><template #default="{ row }">{{ int(row.n) }}</template></el-table-column>
+              <el-table-column :label="t('占比')" align="right"><template #default="{ row }">{{ pct(row.n / deaths.total) }}</template></el-table-column>
             </el-table>
           </div>
           <div>
-            <b>受到的伤害</b>
+            <b>{{ t("受到的伤害") }}</b>
             <el-table :data="deaths.taken" size="small" max-height="360">
-              <el-table-column prop="name" label="来源" min-width="160" />
-              <el-table-column label="伤害/小时" align="right"><template #default="{ row }">{{ int(row.perHour) }}</template></el-table-column>
-              <el-table-column label="最大一击" align="right"><template #default="{ row }">{{ int(row.max) }}</template></el-table-column>
-              <el-table-column label="命中率" align="right"><template #default="{ row }">{{ pct(row.hitRate) }}</template></el-table-column>
+              <el-table-column prop="name" :label="t('来源')" min-width="160" />
+              <el-table-column :label="t('伤害/小时')" align="right"><template #default="{ row }">{{ int(row.perHour) }}</template></el-table-column>
+              <el-table-column :label="t('最大一击')" align="right"><template #default="{ row }">{{ int(row.max) }}</template></el-table-column>
+              <el-table-column :label="t('命中率')" align="right"><template #default="{ row }">{{ pct(row.hitRate) }}</template></el-table-column>
             </el-table>
           </div>
         </div>
       </el-card>
       <el-card v-if="levels.length">
         <template #header>
-          <div class="row"><b>升级时间</b><span class="muted">（按同步时的经验，一直刷这里）</span>
+          <div class="row"><b>{{ t("升级时间") }}</b><span class="muted">{{ t("（按同步时的经验，一直刷这里）") }}</span>
             <el-radio-group v-model="who" size="small"><el-radio-button v-for="(m, i) in runMembers" :key="i" :value="i">{{ m.name }}</el-radio-button></el-radio-group>
           </div>
         </template>
         <el-table :data="levels" size="small">
-          <el-table-column prop="label" label="技能" width="70" />
-          <el-table-column label="等级" width="170"><template #default="{ row }">Lv.{{ row.level }} <span class="muted">{{ row.exact ? pct(row.progress) : "无经验数据" }}</span></template></el-table-column>
-          <el-table-column label="经验/小时" align="right"><template #default="{ row }">{{ int(row.rate) }}</template></el-table-column>
-          <el-table-column label="升下一级" align="right"><template #default="{ row }">{{ row.next == null ? "满级" : duration(row.next) }}</template></el-table-column>
-          <el-table-column label="目标等级" align="center" width="150"><template #default="{ row }"><el-input-number v-if="row.level < row.cap" :model-value="row.goal" :min="row.level + 1" :max="row.cap" size="small" style="width: 110px" @update:model-value="v => (goalLevel[row.key] = v)" /></template></el-table-column>
-          <el-table-column label="到目标" align="right"><template #default="{ row }">{{ row.toGoal == null ? "—" : duration(row.toGoal) }}</template></el-table-column>
+          <el-table-column prop="label" :label="t('技能')" width="70" />
+          <el-table-column :label="t('等级')" width="170"><template #default="{ row }">Lv.{{ row.level }} <span class="muted">{{ row.exact ? pct(row.progress) : t("无经验数据") }}</span></template></el-table-column>
+          <el-table-column :label="t('经验/小时')" align="right"><template #default="{ row }">{{ int(row.rate) }}</template></el-table-column>
+          <el-table-column :label="t('升下一级')" align="right"><template #default="{ row }">{{ row.next == null ? t("满级") : duration(row.next) }}</template></el-table-column>
+          <el-table-column :label="t('目标等级')" align="center" width="150"><template #default="{ row }"><el-input-number v-if="row.level < row.cap" :model-value="row.goal" :min="row.level + 1" :max="row.cap" size="small" style="width: 110px" @update:model-value="v => (goalLevel[row.key] = v)" /></template></el-table-column>
+          <el-table-column :label="t('到目标')" align="right"><template #default="{ row }">{{ row.toGoal == null ? "—" : duration(row.toGoal) }}</template></el-table-column>
         </el-table>
       </el-card>
     </div>

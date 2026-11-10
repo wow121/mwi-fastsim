@@ -6,6 +6,7 @@
 import { pool } from "./search.mjs"
 import { seedList, vsBase } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
+import { t } from "./lang.mjs"
 import { statGroups, styleOf } from "./stat-groups.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
@@ -116,7 +117,7 @@ export async function statValue(ev, params, api) {
   let done = 0
   const run = async (team, s = seeds) => {
     const r = await ev.evaluate(team, target, { hours, seeds: s, extra, objective, signal: api.signal })
-    api.progress(++done, total, "模拟")
+    api.progress(++done, total, t("模拟#progress"))
     return r
   }
   const teamWith = (i, cfg) => members.map((c, j) => (j === i ? cfg : c))

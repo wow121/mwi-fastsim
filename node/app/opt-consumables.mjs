@@ -14,6 +14,7 @@ import { confirmAdaptive, confirmWork, halving, halvingWork } from "./search.mjs
 import { defaultTriggers, teamDTO, triggersFor } from "./model.mjs"
 import { OBJECTIVE_FORMATS, paired, seedList } from "./evaluator.mjs"
 import { zh } from "./i18n.mjs"
+import { t, tk } from "./lang.mjs"
 import { playerStats } from "./game.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
@@ -21,7 +22,7 @@ const D = "/combat_trigger_dependencies/"
 const C = "/combat_trigger_conditions/"
 const K = "/combat_trigger_comparators/"
 const cond = (dep, c, cmp, value = 0) => ({ dependencyHrid: D + dep, conditionHrid: C + c, comparatorHrid: K + cmp, value })
-const KINDS = [["food", "/item_categories/food", "食物"], ["drinks", "/item_categories/drink", "饮料"]]
+const KINDS = [["food", "/item_categories/food", tk("食物")], ["drinks", "/item_categories/drink", tk("饮料")]]
 
 /** Max HP / MP and unlocked food/drink slots of a member. */
 function memberInfo(m, dto) {
@@ -37,15 +38,15 @@ function templates(m, hrid, info) {
   const out = []
   const coarse = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   if (d.hitpointRestore > 0) {
-    for (const v of grid(info.hp, coarse)) out.push({ family: "missing_hp", label: `缺失HP ≥ ${v}`, triggers: [cond("self", "missing_hp", "greater_than_equal", v)], value: v })
-    for (const v of grid(info.hp, coarse)) out.push({ family: "current_hp", label: `当前HP ≤ ${v}`, triggers: [cond("self", "current_hp", "less_than_equal", v)], value: v })
+    for (const v of grid(info.hp, coarse)) out.push({ family: "missing_hp", label: t("缺失HP ≥ {v}", { v }), triggers: [cond("self", "missing_hp", "greater_than_equal", v)], value: v })
+    for (const v of grid(info.hp, coarse)) out.push({ family: "current_hp", label: t("当前HP ≤ {v}", { v }), triggers: [cond("self", "current_hp", "less_than_equal", v)], value: v })
   }
   if (d.manapointRestore > 0)
-    for (const v of grid(info.mp, coarse)) out.push({ family: "missing_mp", label: `缺失MP ≥ ${v}`, triggers: [cond("self", "missing_mp", "greater_than_equal", v)], value: v })
+    for (const v of grid(info.mp, coarse)) out.push({ family: "missing_mp", label: t("缺失MP ≥ {v}", { v }), triggers: [cond("self", "missing_mp", "greater_than_equal", v)], value: v })
   if (!(d.hitpointRestore > 0) && !(d.manapointRestore > 0)) {
-    out.push({ family: "in_combat", label: "有目标时（战斗中）", triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", 1)] })
-    for (const n of [2, 3, 4]) out.push({ family: "enemies", label: `所有敌人的存活数 ≥ ${n}`, triggers: [cond("all_enemies", "number_of_active_units", "greater_than_equal", n)], value: n })
-    for (const v of [5000, 10000, 20000, 40000]) out.push({ family: "target_hp", label: `目标敌人的当前HP ≥ ${v}`, triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", v)], value: v })
+    out.push({ family: "in_combat", label: t("有目标时（战斗中）"), triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", 1)] })
+    for (const n of [2, 3, 4]) out.push({ family: "enemies", label: t("所有敌人的存活数 ≥ {n}", { n }), triggers: [cond("all_enemies", "number_of_active_units", "greater_than_equal", n)], value: n })
+    for (const v of [5000, 10000, 20000, 40000]) out.push({ family: "target_hp", label: t("目标敌人的当前HP ≥ {v}", { v }), triggers: [cond("targeted_enemy", "current_hp", "greater_than_equal", v)], value: v })
   }
   return out
 }
@@ -56,9 +57,9 @@ function refineAround(best, info) {
   if (!step) return []
   return [-1, 1].map(f => {
     const v = Math.max(1, Math.round((best.value + f * step) / 10) * 10)
-    const t = clone(best.triggers)
-    t[0].value = v
-    return { ...best, label: best.label.replace(/\d+$/, String(v)), triggers: t, value: v }
+    const trig = clone(best.triggers)
+    trig[0].value = v
+    return { ...best, label: best.label.replace(/\d+$/, String(v)), triggers: trig, value: v }
   })
 }
 
@@ -100,7 +101,7 @@ function swapTriggers(m, member, from, to) {
   return out
 }
 
-const CARRIED = "（沿用原触发）"
+const CARRIED = () => t("（沿用原触发）")
 // share of searches whose winner looks clearly better and goes on to the (costly) confirmation
 const CONFIRM_SHARE = 0.5
 
@@ -156,7 +157,7 @@ export async function optimizeConsumables(ev, params, api) {
   api.remaining?.(FINAL + rounds * sum(plan) + FINAL)
 
   const baseline = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
-  api.log(`基准：${fmt(baseline.value, objective)}`)
+  api.log(t("基准：{v}", { v: fmt(baseline.value, objective) }))
   const changes = []
   // the last halving stage picks the best on its own seeds, so its number flatters it (the best of
   // dozens): a winner is taken only once it is confirmed against the current setting on fresh seeds
@@ -166,9 +167,9 @@ export async function optimizeConsumables(ev, params, api) {
     if (best.incumbent || !best.vsIncumbent?.clearlyBetter) return null
     const cur = ranked.find(r => r.incumbent)
     if (!cur) return best
-    const [c] = await confirmAdaptive(ev, common, stages, cur, [best], { seedBase: 70000 + 97 * confirms++, label: `${label} · 复核`, api })
+    const [c] = await confirmAdaptive(ev, common, stages, cur, [best], { seedBase: 70000 + 97 * confirms++, label: t("{label} · 复核", { label }), api })
     if (c.vsIncumbent.clearlyBetter) return { ...best, vsIncumbent: c.vsIncumbent }
-    api.log(`${label}：最好的候选初看 +${fmt(best.vsIncumbent.mean, objective)}，换一组随机种子复核 ${c.vsIncumbent.mean >= 0 ? "+" : ""}${fmt(c.vsIncumbent.mean, objective)} ± ${fmt(1.96 * c.vsIncumbent.se, objective)}，不显著，不换`)
+    api.log(t("{label}：最好的候选初看 +{first}，换一组随机种子复核 {gain} ± {se}，不显著，不换", { label, first: fmt(best.vsIncumbent.mean, objective), gain: (c.vsIncumbent.mean >= 0 ? "+" : "") + fmt(c.vsIncumbent.mean, objective), se: fmt(1.96 * c.vsIncumbent.se, objective) }))
     return null
   }
 
@@ -197,27 +198,27 @@ export async function optimizeConsumables(ev, params, api) {
                 mem[i][kind] = mem[i][kind].map(h => (h === from ? to : h))
                 ;(carried ? variants[k].at(-1) : variants[k][0]).apply(mem[i])
               })
-              cands.push({ key: carried ? to + CARRIED : to, hrid: to, carried, members: mem })
+              cands.push({ key: carried ? to + "+carried" : to, hrid: to, carried, members: mem })
             }
           }
-          const where = `全队 · ${kindName} · ${zh(m.$e, from)}`
+          const where = t("全队 · {kind} · {item}", { kind: t(kindName), item: zh(m.$e, from) })
           if (plan[step]) plan[step][0] = halvingWork(cands.length, teamStages)
           ahead()
           const ranked = await halving(ev, cands, {
             ...common,
             stages: teamStages,
             seedBase: 500 * round + (kind === "food" ? 0 : 11) + pool[kind].indexOf(from),
-            onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 全队换药`),
+            onStage: (s, d, tot) => api.progress(d, tot, t("第 {round} 轮 · {where} · 全队换药", { round, where })),
           })
           ahead(1)
-          const best = await confirmed(ranked, teamStages, `${where} · 全队换药`)
+          const best = await confirmed(ranked, teamStages, t("{where} · 全队换药", { where }))
           ahead(2)
           if (best) {
             members = best.members
             changed = true
-            const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED : "")
-            changes.push({ round, member: who[0], members: who, team: true, kind, what: "物品", from: zh(m.$e, from), to, gain: best.vsIncumbent })
-            api.log(`${where} → ${to}（${who.length} 人，+${fmt(best.vsIncumbent.mean, objective)}）`)
+            const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED() : "")
+            changes.push({ round, member: who[0], members: who, team: true, kind, what: t("物品"), from: zh(m.$e, from), to, gain: best.vsIncumbent })
+            api.log(t("{where} → {to}（{n} 人，+{gain}）", { where, to, n: who.length, gain: fmt(best.vsIncumbent.mean, objective) }))
             api.partial({ members, changes, baseline: baseline.mean, objective })
           }
         }
@@ -225,18 +226,18 @@ export async function optimizeConsumables(ev, params, api) {
     }
 
     for (const idx of optimize) {
-      const who = members[idx].name || `队员${idx + 1}`
+      const who = members[idx].name || t("队员{n}", { n: idx + 1 })
       for (const [kind, , kindName] of KINDS) {
         for (let slot = 0; slot < slotCount(idx, kind); slot++) {
           if (api.signal.aborted) throw new Error("cancelled")
           step++
           const cur = members[idx][kind]?.[slot] || ""
-          const where = `${who} · ${kindName} ${slot + 1}`
+          const where = t("{who} · {kind} {slot}", { who, kind: t(kindName), slot: slot + 1 })
 
           // 1) which item
           if (swapItems) {
             const others = (members[idx][kind] || []).filter((h, i) => h && i !== slot)
-            const cands = [{ key: cur || "空", members: clone(members), incumbent: true }]
+            const cands = [{ key: cur || "empty", members: clone(members), incumbent: true }]
             for (const h of pool[kind]) {
               if (h === cur || others.includes(h)) continue
               if (others.some(o => conflicts(m, h, o))) continue
@@ -245,7 +246,7 @@ export async function optimizeConsumables(ev, params, api) {
                 mem[idx][kind] = [...(mem[idx][kind] || ["", "", ""])]
                 mem[idx][kind][slot] = h
                 v.apply(mem[idx])
-                cands.push({ key: v.carried ? h + CARRIED : h, hrid: h, carried: v.carried, members: mem })
+                cands.push({ key: v.carried ? h + "+carried" : h, hrid: h, carried: v.carried, members: mem })
               }
             }
             if (plan[step]) plan[step][0] = halvingWork(cands.length, itemStages)
@@ -254,17 +255,17 @@ export async function optimizeConsumables(ev, params, api) {
               ...common,
               stages: itemStages,
               seedBase: 400 * round + idx * 31 + slot + (kind === "food" ? 0 : 7),
-              onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · 选药`),
+              onStage: (s, d, tot) => api.progress(d, tot, t("第 {round} 轮 · {where} · 选药", { round, where })),
             })
             ahead(1)
-            const best = await confirmed(ranked, itemStages, `${where} · 选药`)
+            const best = await confirmed(ranked, itemStages, t("{where} · 选药", { where }))
             ahead(2)
             if (best) {
               members = best.members
               changed = true
-              const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED : "")
-              changes.push({ round, member: idx, kind, slot, what: "物品", from: cur ? zh(m.$e, cur) : "空", to, gain: best.vsIncumbent })
-              api.log(`${where}：${cur ? zh(m.$e, cur) : "空"} → ${to}（+${fmt(best.vsIncumbent.mean, objective)}）`)
+              const to = zh(m.$e, best.hrid) + (best.carried ? CARRIED() : "")
+              changes.push({ round, member: idx, kind, slot, what: t("物品"), from: cur ? zh(m.$e, cur) : t("空"), to, gain: best.vsIncumbent })
+              api.log(t("{where}：{from} → {to}（+{gain}）", { where, from: cur ? zh(m.$e, cur) : t("空"), to, gain: fmt(best.vsIncumbent.mean, objective) }))
             }
           }
 
@@ -274,9 +275,9 @@ export async function optimizeConsumables(ev, params, api) {
           const name = zh(m.$e, hrid)
           const curTrig = triggersFor(m, members[idx].triggerMap || {}, hrid)
           const base = [
-            { label: "当前", triggers: curTrig },
-            { label: "游戏默认", triggers: defaultTriggers(m, hrid) },
-            { label: "无条件（冷却好就用）", triggers: [] },
+            { label: t("当前"), triggers: curTrig },
+            { label: t("游戏默认"), triggers: defaultTriggers(m, hrid) },
+            { label: t("无条件（冷却好就用）"), triggers: [] },
             ...templates(m, hrid, infos[idx]),
           ]
           const mk = list => {
@@ -299,19 +300,19 @@ export async function optimizeConsumables(ev, params, api) {
             ...common,
             stages: trigStages,
             seedBase: 300 * round + idx * 17 + slot + (kind === "food" ? 0 : 5),
-            onStage: (s, d, t) => api.progress(d, t, `第 ${round} 轮 · ${where} · ${name} 触发`),
+            onStage: (s, d, tot) => api.progress(d, tot, t("第 {round} 轮 · {where} · {name} 触发", { round, where, name })),
           })
           const fine = refineAround(ranked[0].variant, infos[idx])
           ahead(3)
           if (fine.length) ranked = await halving(ev, mk([base[0], ranked[0].variant, ...fine]), { ...common, stages: [trigStages[1]], seedBase: 900 + idx })
           ahead(4)
-          const best = await confirmed(ranked, trigStages, `${where} · ${name} 触发`)
+          const best = await confirmed(ranked, trigStages, t("{where} · {name} 触发", { where, name }))
           ahead(5)
           if (best) {
             members = best.members
             changed = true
-            changes.push({ round, member: idx, kind, slot, what: "触发", from: "", to: `${name}：${best.label}`, gain: best.vsIncumbent })
-            api.log(`${where} · ${name} 触发 → ${best.label}`)
+            changes.push({ round, member: idx, kind, slot, what: t("触发"), from: "", to: t("{name}：{label}", { name, label: best.label }), gain: best.vsIncumbent })
+            api.log(t("{where} · {name} 触发 → {label}", { where, name, label: best.label }))
           }
           api.partial({ members, changes, baseline: baseline.mean, objective })
         }
@@ -324,15 +325,15 @@ export async function optimizeConsumables(ev, params, api) {
   const final = await ev.evaluate(members, target, { hours: 24, seeds: finalSeeds, extra, objective, signal: api.signal })
   const improvement = paired(final.perSeed, baseline.perSeed)
   if (!changes.length || improvement.mean <= 0) {
-    api.log(changes.length ? "复核没有提升，保留原来的设置" : "当前药水配置已是最好")
+    api.log(changes.length ? t("复核没有提升，保留原来的设置") : t("当前药水配置已是最好"))
     return { members: clone(params.members), changes: [], rejected: changes, baseline: baseline.mean, final: baseline.mean, improvement: { mean: 0, se: 0, low: 0, high: 0 }, objective, unchanged: true }
   }
-  api.log(`完成：${fmt(final.value, objective)}（基准 ${fmt(baseline.value, objective)}，提升 ${fmt(improvement.mean, objective)}）`)
+  api.log(t("完成：{v}（基准 {base}，提升 {gain}）", { v: fmt(final.value, objective), base: fmt(baseline.value, objective), gain: fmt(improvement.mean, objective) }))
   return { members, changes, baseline: baseline.mean, final: final.mean, improvement, objective }
 }
 
 function fmt(v, objective) {
   if (OBJECTIVE_FORMATS[objective]) return OBJECTIVE_FORMATS[objective](v)
-  if (objective === "xp") return `${Math.round(v).toLocaleString()} 经验/小时`
-  return `${(v * 24 / 1e6).toFixed(2)}M/天`
+  if (objective === "xp") return t("{v} 经验/小时", { v: Math.round(v).toLocaleString() })
+  return t("{v}M/天", { v: (v * 24 / 1e6).toFixed(2) })
 }

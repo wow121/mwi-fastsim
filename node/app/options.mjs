@@ -1,7 +1,9 @@
 // Lists and names the web UI needs, from the engine's game data maps (Chinese names).
 import { guildBuffName, zh } from "./i18n.mjs"
+import { getLang } from "./lang.mjs"
 import { COMBAT_SEALS } from "./game.mjs"
 
+const sealName = s => (getLang() === "en" ? s.replace(/^Scroll Of\s+/i, "") : s.replace(/卷轴$/, "")) // i18n-ok
 const bySort = (a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0) || String(a.name).localeCompare(String(b.name))
 
 export function options(m, book) {
@@ -32,8 +34,8 @@ export function options(m, book) {
     dungeons: actions.filter(a => a.combatZoneInfo.isDungeon).map(zone).sort(bySort),
     labyrinths: Object.values(maps.combatMonsterDetailMap).filter(x => x.isLabyrinthMonster).map(x => ({ hrid: x.hrid, name: n(x.hrid) })),
     labyrinthCrates: Object.keys(maps.labyrinthCrateDetailMap || {}).map(h => ({ hrid: h, name: n(h) })),
-    // "战斗掉落 +15%": the item name without the trailing 卷轴
-    seals: COMBAT_SEALS.map(x => ({ key: x.key, name: `${n(`/items/seal_of_${x.key}`).replace(/卷轴$/, "")} +${Math.round((x.flatBoost || x.ratioBoost) * 100)}%` })),
+    // "战斗掉落 +15%": the item name without the trailing 卷轴 (English: without the leading "Scroll Of")
+    seals: COMBAT_SEALS.map(x => ({ key: x.key, name: `${sealName(n(`/items/seal_of_${x.key}`))} +${Math.round((x.flatBoost || x.ratioBoost) * 100)}%` })),
     trigger: {
       dependencies: Object.values(maps.combatTriggerDependencyDetailMap).sort(bySort).map(d => ({ hrid: d.hrid, name: n(d.hrid), single: !!d.isSingleTarget })),
       conditions: Object.values(maps.combatTriggerConditionDetailMap).sort(bySort).map(c => ({ hrid: c.hrid, name: n(c.hrid), single: !!c.isSingleTarget, multi: !!c.isMultiTarget, comparators: c.allowedComparatorHrids || [] })),

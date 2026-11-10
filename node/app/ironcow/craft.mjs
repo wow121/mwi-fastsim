@@ -4,9 +4,11 @@
 // Items no action makes (key fragments, combat-only drops) cost no time here and are listed as
 // "missing"; actions above the player's level are still used but listed as "locked".
 import { zh } from "../i18n.mjs"
+import { t, tk } from "../lang.mjs"
 
 export const LIFE_SKILLS = ["milking", "foraging", "woodcutting", "cheesesmithing", "crafting", "tailoring", "cooking", "brewing"]
-export const SKILL_NAMES = { milking: "挤奶", foraging: "采摘", woodcutting: "伐木", cheesesmithing: "奶酪锻造", crafting: "制作", tailoring: "缝纫", cooking: "烹饪", brewing: "冲泡" }
+// t() keys: translate where shown
+export const SKILL_NAMES = { milking: tk("挤奶"), foraging: tk("采摘"), woodcutting: tk("伐木"), cheesesmithing: tk("奶酪锻造"), crafting: tk("制作"), tailoring: tk("缝纫"), cooking: tk("烹饪"), brewing: tk("冲泡") }
 const GATHERING = new Set(["milking", "foraging", "woodcutting"])
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
 const skillOf = a => String(a?.type || "").replace("/action_types/", "")
@@ -76,15 +78,15 @@ export class CraftTimes {
       const s2 = new Set(stack).add(hrid)
       for (const mk of this.makers.get(hrid) || []) {
         const a = mk.action
-        const t = this.actionSeconds(a, mk.skill)
-        const locked = new Set(c.levels[mk.skill] + c.levelBonus[mk.skill] < num(a.levelRequirement?.level, 1) ? [`${zh(this.maps, a.hrid)}（${SKILL_NAMES[mk.skill]} ${a.levelRequirement.level} 级）`] : [])
+        const secs = this.actionSeconds(a, mk.skill)
+        const locked = new Set(c.levels[mk.skill] + c.levelBonus[mk.skill] < num(a.levelRequirement?.level, 1) ? [t("{action}（{skill} {level} 级）", { action: zh(this.maps, a.hrid), skill: t(SKILL_NAMES[mk.skill]), level: a.levelRequirement.level })] : [])
         let r
-        if (mk.gather) r = { seconds: t / (mk.gather * (1 + c.output[mk.skill] / 100)), action: a.hrid, skill: mk.skill, inputs: [], missing: new Set(), locked }
+        if (mk.gather) r = { seconds: secs / (mk.gather * (1 + c.output[mk.skill] / 100)), action: a.hrid, skill: mk.skill, inputs: [], missing: new Set(), locked }
         else {
           const out = mk.count * (1 + c.output[mk.skill] / 100)
           const inputs = (a.inputItems || []).map(i => ({ hrid: i.itemHrid, count: num(i.count) * (1 - c.artisan[mk.skill] / 100) / out }))
           if (a.upgradeItemHrid) inputs.push({ hrid: a.upgradeItemHrid, count: 1 / out })
-          r = { seconds: t / out, action: a.hrid, skill: mk.skill, inputs, missing: new Set(), locked }
+          r = { seconds: secs / out, action: a.hrid, skill: mk.skill, inputs, missing: new Set(), locked }
           for (const i of inputs) {
             const sub = this.of(i.hrid, s2)
             r.seconds += sub.seconds * i.count

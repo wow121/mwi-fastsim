@@ -1,6 +1,7 @@
 // Sharing results: copy a plain-text summary, or save a part of the page as a PNG.
 import { ElMessage, ElMessageBox } from "element-plus"
 import { h } from "vue"
+import { t } from "./i18n.js"
 
 export async function copyText(text) {
   try {
@@ -14,9 +15,9 @@ export async function copyText(text) {
     const ok = document.execCommand("copy")
     ta.remove()
     // no clipboard at all: show the text to copy by hand
-    if (!ok) return ElMessageBox({ title: "复制下面的文字", message: h("textarea", { value: text, readonly: true, rows: 12, style: "width: 100%; font-size: 12px" }), customStyle: { maxWidth: "720px", width: "90%" } }).catch(() => {})
+    if (!ok) return ElMessageBox({ title: t("复制下面的文字"), message: h("textarea", { value: text, readonly: true, rows: 12, style: "width: 100%; font-size: 12px" }), customStyle: { maxWidth: "720px", width: "90%" } }).catch(() => {})
   }
-  ElMessage.success("已复制")
+  ElMessage.success(t("已复制"))
 }
 
 /** `el`: an element or a component (its root element is used). */
@@ -28,7 +29,7 @@ export async function saveImage(el, name) {
     const url = await toPng(el, { pixelRatio: 2, backgroundColor: getComputedStyle(document.body).backgroundColor || "#fff" })
     Object.assign(document.createElement("a"), { href: url, download: `${name}.png` }).click()
   } catch (e) {
-    ElMessage.error(`保存图片失败：${e.message || e}`)
+    ElMessage.error(t("保存图片失败：{msg}", { msg: e.message || e }))
   }
 }
 

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue"
 import { store } from "../api.js"
+import { t } from "../i18n.js"
 
 // v-model: array of conditions | null (null = game default)
 const model = defineModel()
@@ -31,9 +32,9 @@ function add() {
 
 <template>
   <div>
-    <el-checkbox v-model="useDefault" size="small">使用游戏默认条件</el-checkbox>
+    <el-checkbox v-model="useDefault" size="small">{{ t("使用游戏默认条件") }}</el-checkbox>
     <template v-if="!useDefault">
-      <div v-if="!model.length" class="muted">无条件：冷却好就立即使用</div>
+      <div v-if="!model.length" class="muted">{{ t("无条件：冷却好就立即使用") }}</div>
       <div v-for="(c, i) in model" :key="i" class="row" style="margin: 4px 0">
         <el-select v-model="c.dependencyHrid" @change="touch" size="small" style="width: 130px">
           <el-option v-for="d in o.dependencies" :key="d.hrid" :label="d.name" :value="d.hrid" />
@@ -45,9 +46,9 @@ function add() {
           <el-option v-for="d in cmpsFor(c.conditionHrid)" :key="d.hrid" :label="d.name" :value="d.hrid" />
         </el-select>
         <el-input-number v-if="allowValue(c.comparatorHrid)" v-model="c.value" @change="touch" size="small" style="width: 110px" :controls="false" />
-        <el-button size="small" text type="danger" @click="remove(i)">删除</el-button>
+        <el-button size="small" text type="danger" @click="remove(i)">{{ t("删除") }}</el-button>
       </div>
-      <el-button v-if="model.length < 4" size="small" @click="add">添加条件</el-button>
+      <el-button v-if="model.length < 4" size="small" @click="add">{{ t("添加条件") }}</el-button>
     </template>
   </div>
 </template>

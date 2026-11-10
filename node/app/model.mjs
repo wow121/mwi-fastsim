@@ -3,6 +3,7 @@
 
 import { playerStats } from "./game.mjs"
 import { zh } from "./i18n.mjs"
+import { t } from "./lang.mjs"
 
 export const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
 export const EQUIPMENT_SLOTS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket"]
@@ -141,7 +142,7 @@ export function maxPartySize(m, target) {
 export function checkPartySize(m, members, target) {
   const max = maxPartySize(m, target)
   if (members.length > max) {
-    throw new Error(`${zh(m.$e, target.zoneHrid || target.labyrinthHrid)} 最多 ${max} 人，队伍有 ${members.length} 人`)
+    throw new Error(t("{zone} 最多 {max} 人，队伍有 {n} 人", { zone: zh(m.$e, target.zoneHrid || target.labyrinthHrid), max, n: members.length }))
   }
 }
 

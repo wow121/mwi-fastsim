@@ -1,8 +1,10 @@
 // ==UserScript==
 // @name         MWI 战斗工具
+// @name:en      MWI Combat Tools
 // @namespace    mwi-fastsim
-// @version      0.4.8
+// @version      0.4.9
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
+// @description:en Game page: reads your character and teammates for the local tool / web version (wow121.github.io/mwi-fastsim); combat sim site: runs simulations on the local Rust engine
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
 // @match        https://milkywayidle.com/*
@@ -28,6 +30,16 @@
   const SERVER = "http://127.0.0.1:8765"
   const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window
   const isGame = /milkywayidle(cn)?\.com$/.test(location.hostname)
+  // UI text in the game's language (the tool page: its own setting): Chinese unless it is English
+  const zhUI = () => {
+    try {
+      const l = W.localStorage.getItem("i18nextLng") || W.localStorage.getItem("fastsim-lang") || document.documentElement.lang || navigator.language || ""
+      return !/^en/i.test(l)
+    } catch {
+      return true
+    }
+  }
+  const L = (zh, en) => (zhUI() ? zh : en)
   const isSimSite = location.hostname === "combat.43.167.210.211.sslip.io"
   // what the tool page (browser mode) picks up: the latest capture from the game / the sim site
   const GAME_KEY = "fastsim_game_capture_v1"
@@ -48,8 +60,8 @@
           if (r.status >= 200 && r.status < 300 && !j?.error) resolve(j)
           else reject(new Error(j?.error || `HTTP ${r.status}`))
         },
-        onerror: () => reject(new Error("连不上本地服务（start-server 开了吗？）")),
-        ontimeout: () => reject(new Error("本地服务超时")),
+        onerror: () => reject(new Error(L("连不上本地服务（start-server 开了吗？）", "cannot reach the local server (is start-server running?)"))),  // i18n-ok
+        ontimeout: () => reject(new Error(L("本地服务超时", "local server timed out"))),  // i18n-ok
       })
     })
   }
@@ -306,10 +318,12 @@
         try {
           const r = await post("/api/game", body)
           if (body.initClientData) lastClientData = initClientData
-          badge(`已同步 ${r.members} 人${r.missing?.length ? `（缺：${r.missing.join("、")}，在游戏里点开他们的资料）` : ""}`, !r.missing?.length)
+          const miss = r.missing?.length ? L(`（缺：${r.missing.join("、")}，在游戏里点开他们的资料）`, ` (missing: ${r.missing.join(", ")}; open their profiles in the game)`) : ""  // i18n-ok
+          badge(L(`已同步 ${r.members} 人`, `synced ${r.members} characters`) + miss, !r.missing?.length)  // i18n-ok
         } catch (e) {
           // no local server: the web version picks it up when opened
-          badge(`已读取${missing.length ? `（缺：${missing.join("、")}，在游戏里点开他们的资料）` : ""}，打开网页版工具即可导入`, !missing.length)
+          const miss = missing.length ? L(`（缺：${missing.join("、")}，在游戏里点开他们的资料）`, ` (missing: ${missing.join(", ")}; open their profiles in the game)`) : ""  // i18n-ok
+          badge(L(`已读取${miss}，打开网页版工具即可导入`, `read${miss}, open the web tool to import`), !missing.length)  // i18n-ok
         }
       }, 1000)
     }
@@ -320,12 +334,12 @@
           b = document.createElement("div")
           b.id = "fastsim-badge"
           b.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:99999;padding:4px 8px;border-radius:6px;font:12px sans-serif;color:#fff;opacity:.9;cursor:pointer"
-          b.title = "MWI 战斗工具（本地），点击隐藏"
+          b.title = L("MWI 战斗工具（本地），点击隐藏", "MWI Combat Tools (local), click to hide")  // i18n-ok
           b.onclick = () => b.remove()
           document.body.appendChild(b)
         }
         b.style.background = ok ? "#1a7f37" : "#9a6700"
-        b.textContent = `本地工具：${text}`
+        b.textContent = L(`本地工具：${text}`, `Combat tools: ${text}`)  // i18n-ok
       }
       if (document.body) add()
       else document.addEventListener("DOMContentLoaded", add, { once: true })
@@ -340,7 +354,7 @@
           if (o.type === "init_character_data") {
             done = true
             // ironcow characters go to the ironcow team (the separate 铁牛导入 script)
-            if (/ironcow/i.test(String(o.character?.gameMode || ""))) return badge("铁牛角色不进普通队伍（用「铁牛导入」脚本）", false)
+            if (/ironcow/i.test(String(o.character?.gameMode || ""))) return badge(L("铁牛角色不进普通队伍（用「铁牛导入」脚本）", "ironcow characters are not added to the normal team (use the ironcow import script)"), false)  // i18n-ok
             lastRaw = o
             partyNames = resolvePartyNames(o.partyInfo || o.data?.partyInfo, gameState())
             scheduleSend()
@@ -463,7 +477,7 @@
             this._emit({ type: "simulation_result", simResult: body.simResult })
           } catch (e) {
             if (ctl.signal.aborted) return
-            console.warn("[fastsim] 本地加速失败，改用网站原版 Worker：", e)
+            console.warn("[fastsim] local engine failed, using the site's own worker:", e)
             serverUp = false
             lastProbe = Date.now()
             this._fallback(msg)
@@ -488,8 +502,8 @@
     // "同步到本地": the site's normalized team + plugin game data (alternative to the game page)
     async function syncToLocal(btn) {
       const store = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$pinia?._s?.get("simulator")
-      if (!store) return alert("还没读到网站的队伍数据：请先打开“战斗配置”页面")
-      btn.textContent = "同步中…"
+      if (!store) return alert(L("还没读到网站的队伍数据：请先打开“战斗配置”页面", "The site's team data is not loaded yet: open the combat setup page first"))  // i18n-ok
+      btn.textContent = L("同步中…", "Syncing…")  // i18n-ok
       try {
         const body = {
           store: JSON.parse(JSON.stringify({ players: store.players, simulationSettings: store.simulationSettings, activePlayerId: store.activePlayerId })),
@@ -500,15 +514,15 @@
           const r = await fetch(`${SERVER}/api/sync`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
           const out = await r.json()
           if (!r.ok || out.error) throw new Error(out.error || `HTTP ${r.status}`)
-          btn.textContent = `已同步 ${out.members} 人 ✓`
+          btn.textContent = L(`已同步 ${out.members} 人 ✓`, `Synced ${out.members} characters ✓`)  // i18n-ok
         } catch {
-          btn.textContent = "已保存，打开网页版工具即可导入"
+          btn.textContent = L("已保存，打开网页版工具即可导入", "Saved, open the web tool to import")  // i18n-ok
         }
       } catch (e) {
-        btn.textContent = "同步失败"
-        alert(`同步失败：${e.message}`)
+        btn.textContent = L("同步失败", "Sync failed")  // i18n-ok
+        alert(L(`同步失败：${e.message}`, `Sync failed: ${e.message}`))  // i18n-ok
       }
-      setTimeout(() => (btn.textContent = "网站队伍同步到本地"), 4000)
+      setTimeout(() => (btn.textContent = L("网站队伍同步到本地", "Sync site team to local")), 4000)  // i18n-ok
     }
     function addButtons() {
       if (document.getElementById("fastsim-bar")) return
@@ -522,13 +536,13 @@
         b.onclick = () => fn(b)
         bar.appendChild(b)
       }
-      mk("网站队伍同步到本地", syncToLocal)
-      mk("打开工具", () => window.open(TOOL, "_blank"))
+      mk(L("网站队伍同步到本地", "Sync site team to local"), syncToLocal)  // i18n-ok
+      mk(L("打开工具", "Open tool"), () => window.open(TOOL, "_blank"))  // i18n-ok
       document.body.appendChild(bar)
     }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addButtons)
     else addButtons()
-    probe().then(up => console.info(`[fastsim] 本地加速${up ? "已连接" : "未启动，使用网站原版模拟"}`))
+    probe().then(up => console.info(`[fastsim] local engine ${up ? "connected" : "not running, using the site's own simulation"}`))
   }
 
   // =====================================================================================
