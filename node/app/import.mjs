@@ -343,23 +343,43 @@ function achievements(e) {
   return r
 }
 
-/** `Il` */
-function guildBuffs(maps, e) {
-  if (!has(e, "characterGuildBuffMap") || !has(e, "guildBuildingLevelMap")) return undefined
-  const n = e.characterGuildBuffMap
-  const b = e.guildBuildingLevelMap
-  const lv = {}
-  const entries = Array.isArray(n) ? n.map((s, l) => [String(l), s]) : Object.entries(n && typeof n === "object" ? n : {})
-  for (const [k, l] of entries) {
-    const h = String(l?.guildBuffHrid || l?.hrid || k || "").trim()
-    if (h) lv[h] = Math.max(0, Math.floor(num(l?.level ?? l, 0)))
+/** A character's own guild buff levels: { hrid: level } from whichever field carries them, or null. */
+function personalGuildLevels(e) {
+  const out = {}
+  let found = false
+  const take = (h, v) => {
+    h = String(h || "").trim()
+    if (!h.startsWith("/guild_buffs/")) return
+    const l = Math.floor(num(v?.level ?? v, NaN))
+    if (Number.isFinite(l)) { out[h] = Math.max(out[h] || 0, l); found = true }
   }
+  // the known field first, then any guild-named field of the profile (teammates' shared profiles)
+  const fields = [e?.characterGuildBuffMap]
+  for (const src of [e, e?.sharableCharacter]) if (src && typeof src === "object") for (const [k, v] of Object.entries(src)) if (/guild/i.test(k) && !/building/i.test(k) && v !== e?.characterGuildBuffMap) fields.push(v)
+  // { hrid: level }, { hrid: { level } }, [{ guildBuffHrid, level }], or one of those a few levels down
+  const scan = (f, depth) => {
+    if (!f || typeof f !== "object" || depth > 3) return
+    for (const [k, v] of Object.entries(f)) {
+      const h = String(v?.guildBuffHrid || v?.hrid || k)
+      if (h.startsWith("/guild_buffs/")) take(h, v)
+      else if (v && typeof v === "object") scan(v, depth + 1)
+    }
+  }
+  for (const f of fields) scan(f, 0)
+  return found ? out : null
+}
+
+/** `Il`: a member's combat guild buff levels, capped by the guild's shrines when known
+ *  (only the logged-in character sees them; a teammate's profile shows just their own levels). */
+function guildBuffs(maps, e) {
+  const lv = personalGuildLevels(e)
+  if (!lv) return has(e, "characterGuildBuffMap") && has(e, "guildBuildingLevelMap") ? normalizeGuildBuffs(maps, {}) : undefined
+  const b = has(e, "guildBuildingLevelMap") && e.guildBuildingLevelMap && typeof e.guildBuildingLevelMap === "object" ? e.guildBuildingLevelMap : null
   const out = {}
   for (const h of combatGuildBuffs(maps)) {
-    const g = maps.guildBuffDetailMap[h]
-    const f = b && typeof b === "object" ? b[g.shrineHrid] : 0
-    const d = Math.max(0, Math.floor(num(f?.level ?? f, 0)))
-    out[h] = Math.min(lv[h] || 0, d, guildBuffMaxLevel(maps, h))
+    const f = b ? b[maps.guildBuffDetailMap[h].shrineHrid] : null
+    const shrine = b ? Math.max(0, Math.floor(num(f?.level ?? f, 0))) : Infinity
+    out[h] = Math.min(lv[h] || 0, shrine, guildBuffMaxLevel(maps, h))
   }
   return normalizeGuildBuffs(maps, out)
 }

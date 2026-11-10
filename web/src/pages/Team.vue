@@ -73,14 +73,6 @@ function setGuild(h, v) {
   member.value.guildBuffs = { ...(member.value.guildBuffs || {}), [h]: Math.max(0, Math.floor(Number(v) || 0)) }
   dirty.value = true
 }
-// the guild's shrine level (only known for the character the script runs on); empty = unknown
-function setShrine(h, v) {
-  const caps = { ...(member.value.guildBuffCaps || {}) }
-  if (v == null || v === "") delete caps[h]
-  else caps[h] = Math.max(0, Math.floor(Number(v) || 0))
-  member.value.guildBuffCaps = caps
-  dirty.value = true
-}
 const shrineOf = h => {
   const v = member.value?.guildBuffCaps?.[h]
   return v == null || !Number.isFinite(Number(v)) ? null : Number(v)
@@ -214,15 +206,16 @@ async function deleteLoadout(l) {
               </div>
             </div>
           </div>
-          <div class="muted" style="margin-bottom: 6px">公会神龛加成（个人等级不超过公会神龛等级；队友资料读不到神龛等级，显示“未知”）</div>
+          <div class="muted" style="margin-bottom: 6px">公会神龛加成（个人等级）</div>
           <div v-for="g in o.guildBuffs" :key="g.hrid" class="row" style="margin-bottom: 6px">
             <span style="width: 290px; white-space: nowrap">{{ g.shrine }} · {{ g.name }}</span>
-            <span class="muted">个人</span>
             <el-input-number :model-value="Number(member.guildBuffs?.[g.hrid] || 0)" :min="0" :max="g.maxLevel" size="small" style="width: 90px" @change="v => setGuild(g.hrid, v)" />
-            <span class="muted">神龛</span>
-            <el-input-number :model-value="shrineOf(g.hrid) ?? undefined" :min="0" :max="g.maxLevel" :value-on-clear="null" placeholder="未知" size="small" style="width: 90px" @change="v => setShrine(g.hrid, v)" />
-            <span v-if="shrineOf(g.hrid) != null && Number(member.guildBuffs?.[g.hrid] || 0) > shrineOf(g.hrid)" class="bad">高于神龛等级</span>
+            <span v-if="shrineOf(g.hrid) != null" class="muted">公会神龛 {{ shrineOf(g.hrid) }} 级</span>
+            <span v-if="shrineOf(g.hrid) != null && Number(member.guildBuffs?.[g.hrid] || 0) > shrineOf(g.hrid)" class="bad">高于公会神龛等级，游戏里只按 {{ shrineOf(g.hrid) }} 级生效</span>
           </div>
+          <el-alert v-if="!member.guildBuffCaps" type="info" :closable="false" show-icon style="margin-top: 6px">
+            <template #title>队友的神龛加成取自队友的个人资料页；资料页看不到公会神龛等级，这里不做限制，按个人等级模拟。如果公会神龛比个人等级低，请手动改小。</template>
+          </el-alert>
         </el-tab-pane>
       </el-tabs>
     </el-card>

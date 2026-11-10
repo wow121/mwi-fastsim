@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWI 战斗工具
 // @namespace    mwi-fastsim
-// @version      0.4.7
+// @version      0.4.8
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
 // @match        https://www.milkywayidle.com/*
@@ -182,6 +182,12 @@
       const out = {}
       for (const k of fields) if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = clone(src[k])
       if (!isCurrent) {
+        // the profile page shows the teammate's own guild buff levels: keep every guild field
+        // whatever it's called (small ones only, not member lists)
+        for (const k of Object.keys(src)) {
+          if (!/guild/i.test(k) || Object.prototype.hasOwnProperty.call(out, k)) continue
+          try { if (JSON.stringify(src[k]).length <= 20000) out[k] = clone(src[k]) } catch {}
+        }
         const wm = wearableItemMap(src)
         if (Object.keys(wm).length) out.wearableItemMap = wm
         const food = combatConsumables(src, "food")
@@ -348,8 +354,10 @@
         try {
           const o = JSON.parse(event.data)
           if (o.type !== "profile_shared") return
-          const p = o.profile || o.data?.profile || o.payload?.profile
+          let p = o.profile || o.data?.profile || o.payload?.profile
           if (!p) return
+          // guild fields sent next to the profile rather than inside it
+          for (const k of Object.keys(o)) if (/guild/i.test(k) && !(k in p)) p = { ...p, [k]: o[k] }
           rememberProfile(p)
           if (lastRaw) scheduleSend()
         } catch (e) {
