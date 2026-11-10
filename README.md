@@ -144,3 +144,7 @@ userscript/        油猴脚本
 - 部分物品、技能等的中文名（`node/app/zh-names.mjs`）提取自上述网站的翻译表；其余取自游戏自己的中文名。
 - 本项目与 Milky Way Idle 官方无关。游戏数据和市场价来自游戏本身，版权归游戏开发者所有。
 - 模拟结果仅供参考，游戏更新后可能与实际情况有差异。
+
+## 许可
+
+[MIT](LICENSE)。战斗引擎部分同时受原 MWI Combat Simulator 的 MIT 许可约束，见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
