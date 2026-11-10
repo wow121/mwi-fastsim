@@ -64,6 +64,28 @@ function setAbilityLevel(a) {
   if (a.abilityHrid) m.abilityLevelMap = { ...(m.abilityLevelMap || {}), [a.abilityHrid]: a.level }
   dirty.value = true
 }
+// house rooms / guild buffs: missing keys read as 0, writes create the map
+function setHouse(h, v) {
+  member.value.houseRooms = { ...(member.value.houseRooms || {}), [h]: Math.max(0, Math.floor(Number(v) || 0)) }
+  dirty.value = true
+}
+function setGuild(h, v) {
+  member.value.guildBuffs = { ...(member.value.guildBuffs || {}), [h]: Math.max(0, Math.floor(Number(v) || 0)) }
+  dirty.value = true
+}
+// the guild's shrine level (only known for the character the script runs on); empty = unknown
+function setShrine(h, v) {
+  const caps = { ...(member.value.guildBuffCaps || {}) }
+  if (v == null || v === "") delete caps[h]
+  else caps[h] = Math.max(0, Math.floor(Number(v) || 0))
+  member.value.guildBuffCaps = caps
+  dirty.value = true
+}
+const shrineOf = h => {
+  const v = member.value?.guildBuffCaps?.[h]
+  return v == null || !Number.isFinite(Number(v)) ? null : Number(v)
+}
+const houseGroups = computed(() => [["战斗房屋", o.value.houseRooms.filter(h => h.combat)], ["其他房屋（只加全局经验和稀有发现）", o.value.houseRooms.filter(h => !h.combat)]])
 async function save() {
   await saveTeam()
   dirty.value = false
@@ -180,6 +202,26 @@ async function deleteLoadout(l) {
               <span class="muted">{{ label }}</span>
               <el-input-number v-model="member.levels[k]" :min="1" :max="200" size="small" style="width: 90px" @change="dirty = true" />
             </div>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="房屋/神龛">
+          <div v-for="[title, rooms] in houseGroups" :key="title" style="margin-bottom: 12px">
+            <div class="muted" style="margin-bottom: 6px">{{ title }}</div>
+            <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))">
+              <div v-for="h in rooms" :key="h.hrid" class="row">
+                <span style="width: 90px; white-space: nowrap">{{ h.name }}</span>
+                <el-input-number :model-value="Number(member.houseRooms?.[h.hrid] || 0)" :min="0" :max="h.maxLevel" size="small" style="width: 90px" @change="v => setHouse(h.hrid, v)" />
+              </div>
+            </div>
+          </div>
+          <div class="muted" style="margin-bottom: 6px">公会神龛加成（个人等级不超过公会神龛等级；队友资料读不到神龛等级，显示“未知”）</div>
+          <div v-for="g in o.guildBuffs" :key="g.hrid" class="row" style="margin-bottom: 6px">
+            <span style="width: 290px; white-space: nowrap">{{ g.shrine }} · {{ g.name }}</span>
+            <span class="muted">个人</span>
+            <el-input-number :model-value="Number(member.guildBuffs?.[g.hrid] || 0)" :min="0" :max="g.maxLevel" size="small" style="width: 90px" @change="v => setGuild(g.hrid, v)" />
+            <span class="muted">神龛</span>
+            <el-input-number :model-value="shrineOf(g.hrid) ?? undefined" :min="0" :max="g.maxLevel" :value-on-clear="null" placeholder="未知" size="small" style="width: 90px" @change="v => setShrine(g.hrid, v)" />
+            <span v-if="shrineOf(g.hrid) != null && Number(member.guildBuffs?.[g.hrid] || 0) > shrineOf(g.hrid)" class="bad">高于神龛等级</span>
           </div>
         </el-tab-pane>
       </el-tabs>

@@ -51,6 +51,18 @@ function lookup(en) {
 }
 
 /** Chinese name of any hrid, falling back to the game's English name. */
+// what each combat guild buff does (the site's name table has no entries for them)
+const GUILD_ZH = {
+  "/guild_buffs/force_combat": "伤害（公会）",
+  "/guild_buffs/rarity_combat": "稀有发现（公会）",
+  "/guild_buffs/scholar_combat": "经验（公会）",
+  "/guild_buffs/spirit_combat": "生命与法力上限（公会）",
+  "/guild_buffs/tempo_combat": "攻击与施法速度（公会）",
+}
+export function guildBuffName(maps, hrid) {
+  return GUILD_ZH[hrid] || (zh(maps, hrid) !== hrid ? zh(maps, hrid) : maps.guildBuffDetailMap?.[hrid]?.name || hrid)
+}
+
 export function zh(maps, hrid) {
   if (!hrid) return ""
   if (OFFICIAL[hrid]) return SYMBOLS[OFFICIAL[hrid]] || OFFICIAL[hrid]

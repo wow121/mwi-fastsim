@@ -7,7 +7,7 @@
 // its spread and sales tax twice, and the plan only does that when the earlier profit is worth it.
 import { nestedApi, pool } from "./search.mjs"
 import { seedList, unpaired, withRunCache } from "./evaluator.mjs"
-import { zh } from "./i18n.mjs"
+import { guildBuffName, zh } from "./i18n.mjs"
 
 const clone = v => JSON.parse(JSON.stringify(v))
 const ARTISAN = 0.89
@@ -424,15 +424,6 @@ export function memberSlots(ctx, gp, members, idx, opts) {
   return out
 }
 
-// what each combat guild buff does (the site's name table has no entries for them)
-const GUILD_ZH = {
-  "/guild_buffs/force_combat": "伤害（公会）",
-  "/guild_buffs/rarity_combat": "稀有发现（公会）",
-  "/guild_buffs/scholar_combat": "经验（公会）",
-  "/guild_buffs/spirit_combat": "生命与法力上限（公会）",
-  "/guild_buffs/tempo_combat": "攻击与施法速度（公会）",
-}
-
 /**
  * Guild buffs: one slot for the whole team (each member's buff is raised to the slot's level).
  * A member's level can't go above their guild's shrine level (`guildBuffCaps`, read from the
@@ -469,7 +460,7 @@ export function guildSlots(maps, members, opts = {}) {
         }
       return { tokens, credits }
     }
-    const name = GUILD_ZH[g.hrid] || (zh(maps, g.hrid) !== g.hrid ? zh(maps, g.hrid) : g.name || g.hrid)
+    const name = guildBuffName(maps, g.hrid)
     out.push({
       key: `guild:${g.hrid}`, hrid: g.hrid, name,
       states: levels.map(l => ({

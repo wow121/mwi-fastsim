@@ -1,5 +1,5 @@
 // Lists and names the web UI needs, from the engine's game data maps (Chinese names).
-import { zh } from "./i18n.mjs"
+import { guildBuffName, zh } from "./i18n.mjs"
 import { COMBAT_SEALS } from "./game.mjs"
 
 const bySort = (a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0) || String(a.name).localeCompare(String(b.name))
@@ -45,7 +45,15 @@ export function options(m, book) {
       monsters: Object.fromEntries(Object.values(maps.combatMonsterDetailMap).map(x => [x.hrid, n(x.hrid)])),
       zones: Object.fromEntries(actions.map(a => [a.hrid, n(a.hrid)])),
     },
-    houseRooms: Object.values(maps.houseRoomDetailMap || {}).map(h => ({ hrid: h.hrid, name: n(h.hrid) })),
+    // combat rooms (levels / speeds / regen) first; the rest only add their global wisdom + rare find
+    houseRooms: Object.values(maps.houseRoomDetailMap || {})
+      .map(h => ({ hrid: h.hrid, name: n(h.hrid), sortIndex: h.sortIndex, combat: !!h.usableInActionTypeMap?.["/action_types/combat"], maxLevel: Math.max(0, ...Object.keys(h.upgradeCostsMap || {}).map(Number).filter(Number.isFinite)) || 8 }))
+      .sort((a, b) => b.combat - a.combat || bySort(a, b)),
+    // combat guild buffs: a member's level, capped by the guild's shrine
+    guildBuffs: Object.values(maps.guildBuffDetailMap || {}).filter(g => g?.isCombat === true).sort(bySort).map(g => ({
+      hrid: g.hrid, name: guildBuffName(maps, g.hrid), shrine: n(g.shrineHrid),
+      maxLevel: (sh => Math.min(sh || 20, Math.max(0, ...Object.keys(g.levelCosts || {}).map(Number).filter(Number.isFinite)) || sh || 20))(Number(maps.guildShrineDetailMap?.[g.shrineHrid]?.maxLevel) || 0),
+    })),
     enhancementCap: (maps.enhancementLevelSuccessRateTable || []).length || 20,
     levelXp: maps.levelExperienceTable || [],
     slotRequirements: maps.abilitySlotsLevelRequirementList || [],
