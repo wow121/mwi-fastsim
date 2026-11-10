@@ -6,7 +6,9 @@ Milky Way Idle（牛牛放置）的战斗模拟与整队优化工具。
 
 *A fast combat simulator and team optimizer for Milky Way Idle. The engine is written in Rust and runs either
 natively behind a small local server or as WebAssembly entirely in the browser. The UI is in Chinese and English
-(switch at the bottom of the sidebar; it follows the browser's language at first).*
+(switch at the bottom of the sidebar; it follows the browser's language at first).
+The engine is a derivative of the community [MWI Combat Simulator](https://github.com/azhu949/MWICombatSimulator)
+(© 2024 AmVoidGuy, MIT); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).*
 
 - **快**：战斗引擎用 Rust 重写，单线程约为原版 JS 引擎的 12 倍（WebAssembly 约 7 倍），并且多线程并行。
 - **整队优化**：不用一个角色一个角色地调，技能、触发条件、药品、装备提升都按整个队伍一起搜索。
@@ -138,5 +140,7 @@ userscript/        油猴脚本
 
 - 战斗引擎移植自[新战斗模拟](https://combat.43.167.210.211.sslip.io)网站的模拟引擎（`combat-events-2.3.0`），
   逐个函数翻译成 Rust，同一随机种子下结果与原版一致（例外：同一个增益再次施加时，原版保留较强的那个，本项目按游戏实际改为后施加的覆盖前面的，影响狂怒未命中减半、队友不同等级的同名光环/减益等；诅咒和虚弱按「层数 × 本次来源的数值」计算，不同来源时可以下降。见 [#1](https://github.com/wow121/mwi-fastsim/issues/1)）。技能优化的候选规则也参考了该网站的技能优化器。感谢原作者。
+- 该网站的战斗引擎源自社区的 [MWI Combat Simulator](https://github.com/azhu949/MWICombatSimulator)（AmVoidGuy 原作，shykai、azhu949 等人维护，MIT 许可），本项目的 Rust 引擎因此也是它的衍生作品，按 MIT 许可的要求在 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 保留了原版权声明和许可全文。
+- 部分物品、技能等的中文名（`node/app/zh-names.mjs`）提取自上述网站的翻译表；其余取自游戏自己的中文名。
 - 本项目与 Milky Way Idle 官方无关。游戏数据和市场价来自游戏本身，版权归游戏开发者所有。
 - 模拟结果仅供参考，游戏更新后可能与实际情况有差异。
