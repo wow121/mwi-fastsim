@@ -146,8 +146,8 @@ function summary() {
       <el-card>
         <template #header><b>{{ t("全队") }}</b><span class="muted" style="margin-left: 8px">{{ targetLabel(ran.target) }} · {{ t("{h} 小时 × {n} 次", { h: ran.hours, n: ran.seeds }) }}{{ ran.seedBase ? t("（换过随机种子）") : "" }} · {{ t("± 是 95% 范围") }}</span></template>
         <div class="row" style="gap: 32px">
-          <div>{{ t("利润（下限）") }}<div style="font-size: 22px">{{ perDay(res.mean.profitPerHour) }}{{ t("/天") }} <span class="muted">{{ ci(res.mean, "profitPerHour", v => money(v * 24)) }}</span></div></div>
-          <div>{{ t("利润（中值）") }}<div style="font-size: 22px">{{ perDay(res.mean.profitMidpointPerHour) }}{{ t("/天") }}</div></div>
+          <div><el-tooltip :content="t('掉落按买一价（直接卖给收购单）、消耗品按卖一价（直接从卖单买）算：不挂单、即买即卖时实际到手的利润')" placement="top"><span class="hint">{{ t("利润（下限）") }}</span></el-tooltip><div style="font-size: 22px">{{ perDay(res.mean.profitPerHour) }}{{ t("/天") }} <span class="muted">{{ ci(res.mean, "profitPerHour", v => money(v * 24)) }}</span></div></div>
+          <div><el-tooltip :content="t('掉落和消耗品都按买一价和卖一价的中间价算：大致是挂单买卖、等成交时的利润')" placement="top"><span class="hint">{{ t("利润（中值）") }}</span></el-tooltip><div style="font-size: 22px">{{ perDay(res.mean.profitMidpointPerHour) }}{{ t("/天") }}</div></div>
           <div>{{ t("经验") }}<div style="font-size: 22px">{{ int(res.mean.xpPerHour) }}{{ t("/小时") }}</div></div>
           <div>{{ t("遭遇") }}<div style="font-size: 22px">{{ res.mean.encountersPerHour.toFixed(1) }}{{ t("/小时") }}</div></div>
           <div>{{ t("死亡") }}<div style="font-size: 22px"><span :class="{ bad: res.mean.deathsPerHour > 0 }">{{ res.mean.deathsPerHour.toFixed(2) }}{{ t("/小时") }}</span> <span class="muted">{{ ci(res.mean, "deathsPerHour") }}</span></div></div>

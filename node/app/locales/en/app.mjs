@@ -247,6 +247,8 @@ export default {
   "± 是 95% 范围": "± is the 95% range",
   "利润（下限）": "Profit (low)",
   "利润（中值）": "Profit (mid)",
+  "掉落按买一价（直接卖给收购单）、消耗品按卖一价（直接从卖单买）算：不挂单、即买即卖时实际到手的利润": "Drops valued at the bid (selling instantly to buy orders), consumables at the ask (buying instantly from sell orders): what you actually make if you never place orders",
+  "掉落和消耗品都按买一价和卖一价的中间价算：大致是挂单买卖、等成交时的利润": "Drops and consumables valued halfway between bid and ask: roughly what you make if you list orders and wait for them to fill",
   "/天": "/day",
   "/小时": "/h",
   "经验": "XP",

@@ -84,8 +84,8 @@ const objKey = computed(() => (result.value?.objective === "xp" ? "xpPerHour" : 
       <div class="row" style="margin-bottom: 8px">
         <span class="muted">{{ t("目标#objective") }}</span>
         <el-radio-group v-model="objective" size="small">
-          <el-radio-button value="profit">{{ t("利润（下限）") }}</el-radio-button>
-          <el-radio-button value="profitMid">{{ t("利润（中值）") }}</el-radio-button>
+          <el-tooltip :content="t('掉落按买一价（直接卖给收购单）、消耗品按卖一价（直接从卖单买）算：不挂单、即买即卖时实际到手的利润')" placement="top"><el-radio-button value="profit">{{ t("利润（下限）") }}</el-radio-button></el-tooltip>
+          <el-tooltip :content="t('掉落和消耗品都按买一价和卖一价的中间价算：大致是挂单买卖、等成交时的利润')" placement="top"><el-radio-button value="profitMid">{{ t("利润（中值）") }}</el-radio-button></el-tooltip>
           <el-radio-button value="xp">{{ t("经验") }}</el-radio-button>
         </el-radio-group>
         <span class="muted">{{ t("精度") }}</span>
