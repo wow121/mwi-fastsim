@@ -2,24 +2,24 @@
 // @name         MWI 战斗工具
 // @name:en      MWI Combat Tools
 // @namespace    mwi-fastsim
-// @version      0.4.9
+// @version      0.4.10
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // @description:en Game page: reads your character and teammates for the local tool / web version (wow121.github.io/mwi-fastsim); combat sim site: runs simulations on the local Rust engine
-// 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上时，照下面的写法加一行 @match
+// 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上、或在本机静态运行（如 http://localhost:5173）时，照下面的写法加一行 @match。
+// 本地服务模式（http://127.0.0.1:8765）默认关闭：在游戏页面的油猴菜单里点「本地服务」开启，
+// Tampermonkey 会询问一次是否允许访问 127.0.0.1（也可以自己在头部加 // @connect 127.0.0.1）
 // @match        https://www.milkywayidle.com/*
 // @match        https://milkywayidle.com/*
 // @match        https://www.milkywayidlecn.com/*
 // @match        https://milkywayidlecn.com/*
 // @match        https://combat.43.167.210.211.sslip.io/*
-// @match        https://wow121.github.io/*
-// @match        http://localhost/*
-// @match        http://127.0.0.1/*
+// @match        https://wow121.github.io/mwi-fastsim/*
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
-// @connect      127.0.0.1
 // @homepageURL  https://github.com/wow121/mwi-fastsim
 // @updateURL    https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js
 // @downloadURL  https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js
@@ -40,6 +40,15 @@
     }
   }
   const L = (zh, en) => (zhUI() ? zh : en)
+  // Sending to the local server is opt-in (no @connect by default): the game page's userscript menu
+  // turns it on, then Tampermonkey asks once to allow 127.0.0.1. Off: no request leaves the page.
+  const LOCAL_KEY = "fastsim_local_server_v1"
+  const localOn = () => !!GM_getValue(LOCAL_KEY, false)
+  if (isGame && typeof GM_registerMenuCommand === "function")
+    GM_registerMenuCommand(localOn() ? L("本地服务：已开启（点击关闭）", "Local server: on (click to turn off)") : L("本地服务：已关闭（点击开启）", "Local server: off (click to turn on)"), () => {  // i18n-ok
+      GM_setValue(LOCAL_KEY, !localOn())
+      location.reload()
+    })
   const isSimSite = location.hostname === "combat.43.167.210.211.sslip.io"
   // what the tool page (browser mode) picks up: the latest capture from the game / the sim site
   const GAME_KEY = "fastsim_game_capture_v1"
@@ -47,6 +56,7 @@
   const TOOL_URL = "fastsim_tool_url_v1"
 
   function post(path, body) {
+    if (!localOn()) return Promise.reject(new Error("local server off"))
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: "POST",

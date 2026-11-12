@@ -52,6 +52,8 @@ node/start-server.sh      # Windows：双击 node/start-server.cmd
 然后：
 
 1. 浏览器安装 [Tampermonkey](https://www.tampermonkey.net/)，再点 [安装脚本](https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js)（之后会自动更新）。
+   打开游戏页面，在油猴菜单里点「本地服务：已关闭（点击开启）」，页面刷新后 Tampermonkey 会问是否允许脚本访问 127.0.0.1，选「总是允许此域名」。
+   脚本默认不连本地服务（网页版用户用不到），所以要自己打开一次；铁牛导入脚本也一样。
 2. 打开游戏页面（队伍里任意一个号都可以）。左下角显示「已同步」就说明读取成功。
    队友的数据来自游戏里的队伍资料，缺哪个队友，就在游戏里点开对方的资料，脚本会自动补上。
 3. 打开 http://127.0.0.1:8765 。
@@ -67,11 +69,13 @@ node/start-server.sh      # Windows：双击 node/start-server.cmd
 - 引擎以 WebAssembly 形式在多个 Web Worker 里并行计算，每个 CPU 核一个。
 - 队伍、任务、游戏数据、市场价都存在浏览器的 IndexedDB 里。
 
-部署在自己的域名上时，要在油猴脚本头部照着已有的 `@match` 加上你的域名，例如：
+部署在自己的域名上，或者在本机用静态网页的方式运行（比如 `http://localhost:5173`）时，要给油猴脚本加上这个地址，例如：
 
 ```js
 // @match        https://mwi.example.com/*
 ```
+
+建议在 Tampermonkey 的脚本设置里加「用户匹配」，直接改脚本头部的话，脚本自动更新后会被覆盖。脚本默认只在游戏页面和 wow121.github.io/mwi-fastsim 上运行，不会匹配 localhost：凡是脚本运行的页面，都能读到它保存的角色数据。
 
 在游戏页面读到的数据会先存在油猴里，打开网页时自动导入。
 
