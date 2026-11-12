@@ -1,4 +1,4 @@
-use mwi_engine::{data, js, prof, sim};
+use mwi_engine::{data, js, prof, sim, talisman};
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufWriter, Write};
@@ -20,6 +20,14 @@ fn run_job_line(gd: &data::GameData, job: &Value) -> String {
 
 fn run_job(gd: &data::GameData, job: &Value) -> Value {
     let id = job.get("id").cloned().unwrap_or(Value::Null);
+    // talisman reroll batch (opt-talisman.mjs): no game data needed
+    if let Some(tj) = job.get("scenario").and_then(|s| s.get("talisman")) {
+        let t0 = Instant::now();
+        return match talisman::run(tj) {
+            Ok(r) => json!({"id": id, "result": r, "ms": t0.elapsed().as_secs_f64() * 1e3, "events": r["steps"]}),
+            Err(e) => json!({"id": id, "error": e}),
+        };
+    }
     let scenario = match job.get("scenario") {
         Some(s) => s,
         None => return json!({"id": id, "error": "job without scenario"}),

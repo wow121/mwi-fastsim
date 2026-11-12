@@ -11,7 +11,6 @@ const info = computed(() => Object.fromEntries(mods.value.map(x => [x.hrid, x]))
 const modName = h => info.value[h]?.name || h
 const GROUPS = [["offense", tk("进攻词条")], ["defense", tk("防御词条")], ["utility", tk("辅助词条")], ["special", tk("特殊词条")]]
 const groups = computed(() => GROUPS.map(([key, label]) => ({ key, label: t(label), list: mods.value.filter(x => x.group === key) })).filter(g => g.list.length))
-const OPS = { add: tk("加词条"), bind: tk("锁定"), reshape: tk("重塑"), reforge: tk("重铸"), mutate: tk("突变"), focus: tk("专注"), attune: tk("调谐"), exchange: tk("置换") }
 
 // inputs, remembered in this browser
 const KEY = "fastsim-talisman-v1"
@@ -93,6 +92,17 @@ const result = ref(null)
 const fmtCost = v => (Number.isFinite(v) ? money(v) : t("超出上限"))
 const isTarget = h => (result.value?.target || target.value).some(q => q.hrid === h)
 const itemName = h => items.value.find(i => i.hrid === h)?.name || h
+// the example run with consecutive dropped rerolls of the same orb folded into one row
+const exampleRows = computed(() => {
+  const out = []
+  for (const x of result.value?.example?.log || []) {
+    const last = out[out.length - 1]
+    if (!x.taken && last && !last.taken && last.op === x.op) last.n++
+    else out.push({ ...x, n: 1 })
+  }
+  return out
+})
+const ORB_ITEM = { reshape: "/items/reshaping_orb", reforge: "/items/reforging_orb", mutate: "/items/mutation_orb", focus: "/items/focus_orb", attune: "/items/attunement_orb", exchange: "/items/exchange_orb", bind: "/items/binding_orb" }
 const gradeOdds = computed(() => {
   const w = weights.value.map(Number)
   const s = w.reduce((a, b) => a + b, 0) || 1
@@ -175,7 +185,10 @@ const gradeOdds = computed(() => {
     <template v-if="result">
       <el-card>
         <template #header><b>{{ t("最便宜的做法") }}</b></template>
-        <div style="margin-bottom: 8px">{{ result.best.text }}</div>
+        <ol v-if="result.best.plan" style="margin: 0 0 8px; padding-left: 22px; line-height: 1.9">
+          <li v-for="(x, i) in result.best.plan" :key="i">{{ x }}</li>
+        </ol>
+        <div v-else style="margin-bottom: 8px">{{ result.best.text }}</div>
         <div class="row" style="margin-bottom: 8px">
           <span>{{ t("期望花费") }} <b>{{ fmtCost(result.best.mean) }}</b></span>
           <span class="muted">{{ t("中位数 {m} · 90% 在 {p} 以内 · 平均 {n} 步", { m: fmtCost(result.best.median), p: fmtCost(result.best.p90), n: result.best.steps.toFixed(0) }) }}</span>
@@ -194,13 +207,18 @@ const gradeOdds = computed(() => {
         </el-table>
       </el-card>
       <el-card v-if="result.example">
-        <template #header><b>{{ t("一次典型的洗练过程") }}</b> <span class="muted">{{ t("花费 {c}，{n} 步（接近中位数的一次）", { c: fmtCost(result.example.cost), n: result.example.steps }) }}</span></template>
-        <div v-for="(x, i) in result.example.log" :key="i" class="row" style="margin-bottom: 2px">
-          <span class="muted" style="width: 36px">{{ i + 1 }}</span>
-          <span style="width: 60px">{{ t(OPS[x.op] || x.op) }}</span>
-          <span style="width: 40px" :class="x.taken ? '' : 'muted'">{{ x.taken ? t("采用") : t("放弃") }}</span>
-          <span :class="x.taken ? '' : 'muted'">
-            <span v-for="(l, k) in x.lines" :key="k" :style="{ marginRight: '12px', fontWeight: isTarget(l.hrid) ? 600 : 400, color: isTarget(l.hrid) && x.taken ? 'var(--el-color-success)' : undefined }">{{ modName(l.hrid) }} G{{ l.grade }}{{ x.lock === k ? " 🔒" : "" }}</span>
+        <template #header><b>{{ t("一次典型的洗练过程") }}</b> <span class="muted">{{ t("花费 {c}，用了 {n} 次宝珠（接近中位数的一次）。绿色是目标词条。", { c: fmtCost(result.example.cost), n: result.example.steps }) }}</span></template>
+        <div v-for="(x, i) in exampleRows" :key="i" class="row" style="margin-bottom: 4px; align-items: baseline">
+          <span class="muted" style="width: 28px">{{ i + 1 }}</span>
+          <span style="width: 230px">
+            <template v-if="x.op === 'add'">{{ t("加一条词条") }}</template>
+            <template v-else-if="x.op === 'bind'">{{ t("用{orb}锁住 {line}", { orb: itemName(ORB_ITEM.bind), line: `${modName(x.lines[x.lock].hrid)} G${x.lines[x.lock].grade}` }) }}</template>
+            <template v-else-if="x.taken">{{ t("用{orb}，洗出：", { orb: itemName(ORB_ITEM[x.op]) }) }}</template>
+            <template v-else>{{ t("用{orb} {n} 次，结果都没要", { orb: itemName(ORB_ITEM[x.op]), n: x.n }) }}</template>
+          </span>
+          <span v-if="x.taken">
+            <span v-for="(l, k) in x.lines" :key="k" :style="{ marginRight: '12px', fontWeight: isTarget(l.hrid) ? 600 : 400, color: isTarget(l.hrid) ? 'var(--el-color-success)' : undefined }">{{ modName(l.hrid) }} G{{ l.grade }}</span>
+            <span v-if="x.op !== 'add' && x.op !== 'bind'" class="muted">{{ t("→ 采用") }}</span>
           </span>
         </div>
         <div v-if="result.example.truncated" class="muted">{{ t("……只显示前 400 步") }}</div>

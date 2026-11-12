@@ -7,6 +7,7 @@ pub mod queue;
 pub mod result;
 pub mod sim;
 pub mod stats;
+pub mod talisman;
 pub mod unit;
 
 #[cfg(target_arch = "wasm32")]

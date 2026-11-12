@@ -1,7 +1,7 @@
 //! Plain C-ABI exports for the browser (no wasm-bindgen): the host copies UTF-8 JSON into memory
 //! from `alloc`, calls `load_gamedata` / `run`, and reads the reply from `out_ptr` / `out_len`.
 //! One engine per Web Worker; panics abort the instance (the host recreates it).
-use crate::{data, sim};
+use crate::{data, sim, talisman};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 
@@ -68,6 +68,11 @@ pub extern "C" fn run(ptr: *mut u8, len: usize, attacks: i32) -> i32 {
     };
     let out = (|| {
         let sc: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        if let Some(tj) = sc.get("talisman") {
+            let r = talisman::run(tj)?;
+            let steps = r["steps"].as_u64().unwrap_or(0);
+            return Ok((r, steps));
+        }
         let limit = sc.get("simulationTimeLimit").map(data::to_num).unwrap_or(0.0);
         let mut s = sim::Sim::new(gd, &sc, attacks != 0)?;
         s.simulate(limit)?;

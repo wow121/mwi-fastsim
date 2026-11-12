@@ -14,7 +14,8 @@
 // Observed on the test server (130 rerolls): a talisman never holds the same type twice; types are drawn by
 // `weight` (1, specials 0.1). The grade odds of a new line are NOT in the game data: by default each grade is
 // half as likely as the one below (fits the 432 observed lines of reshaping + reforging mixed), editable.
-import { SEP, t } from "./lang.mjs"
+import { SEP, joinList, t } from "./lang.mjs"
+import { zh } from "./i18n.mjs"
 
 export const ORBS = {
   reshape: "/items/reshaping_orb",
@@ -56,104 +57,6 @@ export function talismanModel(maps, typeHrid = "/talisman_types/combat", opts = 
   }
 }
 
-// mulberry32: small, seedable
-function rng(seed) {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let x = a
-    x = Math.imul(x ^ (x >>> 15), x | 1)
-    x ^= x + Math.imul(x ^ (x >>> 7), x | 61)
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-function gradeRoll(M, cap, r) {
-  const w = M.gradeWeights.slice(0, cap)
-  let x = r() * w.reduce((a, b) => a + b, 0)
-  for (let i = 0; i < w.length; i++) if ((x -= w[i]) < 0) return i + 1
-  return w.length
-}
-
-/** A type not in `taken`, by weight (× focusWeight for focused types). */
-function typeRoll(M, taken, r, focus) {
-  let total = 0
-  const ws = M.types.map(x => {
-    const w = taken.has(x.hrid) ? 0 : x.weight * (focus?.has(x.hrid) ? M.focusWeight : 1)
-    total += w
-    return w
-  })
-  let v = r() * total
-  for (let i = 0; i < ws.length; i++) if ((v -= ws[i]) < 0) return M.types[i].hrid
-  return M.types[ws.findLastIndex(w => w > 0)].hrid
-}
-
-/** New lines for an orb (the talisman itself is not changed). s = { lines: [{ hrid, grade }], lock: index | -1 } */
-function applyOrb(M, s, op, r, focus) {
-  const lines = s.lines.map(l => ({ ...l }))
-  const free = lines.map((_, i) => i).filter(i => i !== s.lock)
-  if (op === "reshape" || op === "reforge" || op === "focus") {
-    const taken = new Set(s.lock >= 0 ? [lines[s.lock].hrid] : [])
-    for (const i of free) {
-      lines[i].hrid = typeRoll(M, taken, r, op === "focus" ? focus : null)
-      taken.add(lines[i].hrid)
-      if (op !== "focus") lines[i].grade = gradeRoll(M, M.caps[op], r)
-    }
-  } else if (op === "mutate") {
-    const pick = free.slice()
-    for (let k = pick.length - 1; k > 0; k--) {
-      const j = Math.floor(r() * (k + 1));
-      [pick[k], pick[j]] = [pick[j], pick[k]]
-    }
-    const change = pick.slice(0, M.mutateLines)
-    const taken = new Set(lines.filter((_, i) => !change.includes(i)).map(l => l.hrid))
-    for (const i of change) {
-      lines[i].hrid = typeRoll(M, taken, r)
-      taken.add(lines[i].hrid)
-      lines[i].grade = gradeRoll(M, M.caps.mutate, r)
-    }
-  } else if (op === "attune") {
-    for (const i of free) {
-      const x = r()
-      const d = x < M.attune.down ? -1 : x < M.attune.down + M.attune.up ? 1 : 0
-      lines[i].grade = Math.min(M.maxGrade, Math.max(1, lines[i].grade + d))
-    }
-  } else if (op === "exchange") {
-    // "each type takes another line's grade": a random derangement of the unlocked lines' grades
-    const g = free.map(i => lines[i].grade)
-    let p
-    do {
-      p = free.map((_, k) => k)
-      for (let k = p.length - 1; k > 0; k--) {
-        const j = Math.floor(r() * (k + 1));
-        [p[k], p[j]] = [p[j], p[k]]
-      }
-    } while (p.some((v, k) => v === k))
-    free.forEach((i, k) => (lines[i].grade = g[p[k]]))
-  }
-  return lines
-}
-
-/** How close lines are to the target: per requirement the grade of its line (0 = type missing). */
-function status(lines, target) {
-  let types = 0, ok = 0, deficit = 0
-  for (const q of target) {
-    const l = lines.find(x => x.hrid === q.hrid)
-    if (l) {
-      types++
-      if (l.grade >= q.min) ok++
-      else deficit += q.min - l.grade
-    } else deficit += q.min
-  }
-  return { types, ok, deficit, done: ok === target.length }
-}
-
-const better = (a, b, prio) => {
-  const k = prio === "ok" ? [a.ok - b.ok, a.types - b.types, b.deficit - a.deficit] : [a.types - b.types, a.ok - b.ok, b.deficit - a.deficit]
-  for (const d of k) if (d) return d > 0
-  return false
-}
-
 // ------------------------------------------------------------------ strategies
 
 /**
@@ -178,70 +81,44 @@ export function describe(st) {
   return parts.join(SEP())
 }
 
-/** One run of a strategy; returns { cost, counts: { item: n }, steps, done, log? }. */
-export function runOnce(M, start, target, st, prices, r, { maxCost = Infinity, maxSteps = 20000, log = false } = {}) {
-  const s = { lines: start.lines.map(l => ({ ...l })), lock: start.lock ?? -1, bound: (start.lock ?? -1) >= 0 }
-  // a lock on a line the target does not need is taken off first (the game has an unlock; assumed free)
-  if (s.lock >= 0 && !target.some(q => q.hrid === s.lines[s.lock]?.hrid)) {
-    s.lock = -1
-    s.bound = false
+/**
+ * The strategy as steps to follow by hand: which orb, what result to keep, when to stop and switch.
+ * `counts`: average items used (by item hrid), shown next to each orb.
+ */
+export function strategySteps(maps, st, target, start, counts = {}) {
+  const n = h => zh(maps, h)
+  const orb = op => n(ORBS[op])
+  const avg = op => (counts[ORBS[op]] ? t("（平均 {n} 个）", { n: counts[ORBS[op]].toFixed(1) }) : "")
+  const want = q => `${n(q.hrid)} ≥G${q.min}`
+  const all = joinList(target.map(want))
+  const types = joinList(target.map(q => n(q.hrid)))
+  const steps = []
+  const have = start?.lines?.length || 0
+  const lines = st.add === "max" ? Math.max(have, 4) : Math.max(have, target.length)
+  if (lines > have) steps.push(t("用符石核心把词条加到 {n} 条（新词条随机）。", { n: lines }))
+  const keep = st.prio === "ok"
+    ? t("洗出来的结果，达标的词条更多才采用，否则放弃")
+    : t("洗出来的结果，目标词条（{types}）的个数更多才采用；个数一样时达标的更多、或品级更接近目标才采用；否则放弃", { types })
+  const lockWhen = st.lock === "ok"
+    ? t("一旦有一条目标词条达到要求的品级（{all}），马上用{orb}锁住它（只锁一次）。", { all, orb: n(ORBS.bind) })
+    : t("一旦洗出任意一条目标词条（{types}），马上用{orb}锁住它（只锁一次）。", { types, orb: n(ORBS.bind) })
+  const typeStep = (op, until) => {
+    if (op === "focus") return t("反复用{orb}{avg}：每次洗之前把目标词条（{types}）都选为专注，品级不变只换类型。{keep}。{until}", { orb: orb(op), avg: avg(op), types, keep, until })
+    if (op === "mutate") return t("反复用{orb}{avg}：每次随机重洗 2 条没锁的词条。{keep}。{until}", { orb: orb(op), avg: avg(op), keep, until })
+    return t("反复用{orb}{avg}：每次重洗所有没锁的词条（类型和品级，{orb}最高 G{cap}）。{keep}。{until}", { orb: orb(op), avg: avg(op), keep, until, cap: op === "reshape" ? 4 : 6 })
   }
-  const counts = {}
-  let cost = 0
-  const out = log ? [] : null
-  const pay = (item, n = 1) => {
-    counts[item] = (counts[item] || 0) + n
-    cost += (prices[item] || 0) * n
+  if (target.length >= 2 && st.typeOp !== st.lastTypeOp)
+    steps.push(typeStep(st.typeOp, t("洗到只差 1 个目标词条时停下，换下一步。")))
+  else steps.push(typeStep(st.typeOp, t("洗到目标词条（{types}）全部出现时停下，换下一步。", { types })))
+  if (st.lock !== "none") steps.push(lockWhen)
+  if (target.length >= 2 && st.typeOp !== st.lastTypeOp) steps.push(typeStep(st.lastTypeOp, t("洗到最后一个目标词条也出现时停下，换下一步。")))
+  if (st.gradeOp === "attune" || st.gradeOp === "attune+") {
+    if (st.gradeOp === "attune+") steps.push(t("如果有不需要的词条品级比某条目标词条高，先用{orb}{avg}（品级在没锁的词条之间互换），结果更接近目标才采用。", { orb: orb("exchange"), avg: avg("exchange") }))
+    steps.push(t("然后反复用{orb}{avg}：每条没锁的词条 65% 降一级、20% 不变、15% 升一级。结果更接近目标（{all}）才采用，否则放弃。全部达标就完成。", { orb: orb("attune"), avg: avg("attune"), all }))
+  } else {
+    steps.push(t("类型齐了以后继续用{orb}{avg}洗，同样只采用更接近目标的结果，直到 {all} 全部达标。", { orb: orb(st.gradeOp), avg: avg(st.gradeOp), all }))
   }
-  const focus = new Set(target.map(q => q.hrid).filter(h => !M.types.find(x => x.hrid === h)?.special).slice(0, M.focusPickLimit))
-  const want = st.add === "max" ? M.maxLines : Math.max(target.length, s.lines.length)
-  let steps = 0
-  // add lines (a new line gets a random new type and a grade like a reforge)
-  while (s.lines.length < want) {
-    const n = s.lines.length + 1
-    if (n === 1) pay(ORBS.core1)
-    else pay(M.addCost[n].itemHrid, M.addCost[n].count)
-    const taken = new Set(s.lines.map(l => l.hrid))
-    s.lines.push({ hrid: typeRoll(M, taken, r), grade: gradeRoll(M, M.caps.reforge, r) })
-    out?.push({ op: "add", lines: s.lines.map(l => ({ ...l })), taken: true })
-  }
-  let cur = status(s.lines, target)
-  while (!cur.done && steps < maxSteps && cost < maxCost) {
-    steps++
-    // lock
-    if (!s.bound && st.lock !== "none") {
-      const i = s.lines.findIndex(l => target.some(q => q.hrid === l.hrid && (st.lock === "type" || l.grade >= q.min)))
-      const freeAfter = s.lines.length - 1
-      if (i >= 0 && freeAfter >= 1) {
-        pay(ORBS.bind)
-        s.lock = i
-        s.bound = true
-        out?.push({ op: "bind", lines: s.lines.map(l => ({ ...l })), lock: i, taken: true })
-        continue
-      }
-    }
-    const missing = target.length - cur.types
-    let op = missing >= 2 ? st.typeOp : missing === 1 ? st.lastTypeOp : st.gradeOp
-    const unlocked = s.lines.length - (s.lock >= 0 ? 1 : 0)
-    if (op === "attune+") {
-      // exchange pays off when a line the target does not need holds a higher grade than a short line
-      const spare = s.lines.filter((l, i) => i !== s.lock && !target.some(q => q.hrid === l.hrid)).map(l => l.grade)
-      const short = s.lines.filter((l, i) => i !== s.lock && target.some(q => q.hrid === l.hrid && l.grade < q.min)).map(l => l.grade)
-      op = spare.length && short.length && Math.max(...spare) > Math.min(...short) && unlocked >= 2 ? "exchange" : "attune"
-    }
-    if ((op === "mutate" || op === "exchange") && unlocked < 2) op = op === "mutate" ? "reforge" : "attune"
-    if (unlocked < 1) return { cost: Infinity, counts, steps, done: false, log: out }
-    pay(ORBS[op])
-    const lines = applyOrb(M, s, op, r, focus)
-    const next = status(lines, target)
-    const take = better(next, cur, st.prio)
-    out?.push({ op, lines, taken: take, before: s.lines.map(l => ({ ...l })) })
-    if (take) {
-      s.lines = lines
-      cur = next
-    }
-  }
-  return { cost: cur.done ? cost : Infinity, counts, steps, done: cur.done, log: out }
+  return steps
 }
 
 const OPTION_SETS = {
@@ -254,91 +131,110 @@ const OPTION_SETS = {
 }
 const DEFAULT_STRATEGY = { add: "max", typeOp: "reshape", lastTypeOp: "reshape", gradeOp: "attune", lock: "ok", prio: "types" }
 
-function summarize(runs) {
-  const costs = runs.map(x => x.cost).sort((a, b) => a - b)
-  const ok = costs.filter(Number.isFinite)
-  const q = p => costs[Math.min(costs.length - 1, Math.floor(p * costs.length))]
-  const counts = {}
-  for (const x of runs) for (const [k, v] of Object.entries(x.counts)) counts[k] = (counts[k] || 0) + v / runs.length
+// item slots of the engine's talisman job (engine/src/talisman.rs), in this order
+const ITEM_ORDER = ["reshape", "reforge", "mutate", "focus", "attune", "exchange", "bind", "core1", "core2", "core3"]
+const CHUNK = 64 // runs per engine job: one strategy spreads over all engine threads / wasm workers
+
+/** Mean / median / p90 / success from per-run costs (−1 = not reached). */
+function summarize(costs, steps, counts) {
+  const c = costs.map(x => (x < 0 ? Infinity : x)).sort((a, b) => a - b)
+  const ok = c.filter(Number.isFinite)
+  const q = p => c[Math.min(c.length - 1, Math.floor(p * c.length))]
   return {
-    mean: ok.length === costs.length ? ok.reduce((a, b) => a + b, 0) / ok.length : Infinity,
-    median: q(0.5), p90: q(0.9), success: ok.length / costs.length,
-    steps: runs.reduce((a, x) => a + x.steps, 0) / runs.length,
-    counts,
+    mean: ok.length === c.length ? ok.reduce((a, b) => a + b, 0) / ok.length : Infinity,
+    median: q(0.5), p90: q(0.9), success: ok.length / c.length,
+    steps: steps / c.length,
+    counts: Object.fromEntries(ITEM_ORDER.map((k, i) => [ORBS[k], counts[i] / c.length]).filter(([, v]) => v > 0)),
   }
 }
 
 /**
- * Job: params { typeHrid, start: { lines: [{ hrid, grade }], lock }, target: [{ hrid, min }], prices: { item: coins },
- *   gradeWeights, runs, seed }. Coordinate search over the strategy options (each option changed in turn,
- *   the better one kept, two rounds), then the best few again with more runs.
+ * Job: params { typeHrid, start: { lines: [{ hrid, grade }], lockHrid }, target: [{ hrid, min }], prices: { item: coins },
+ *   gradeWeights, runs, seed }. Coordinate search over the strategy options (all values of one option at once, the
+ *   best kept, two rounds), then the best few again with 4× the runs. The rerolls run in the engine
+ *   (engine/src/talisman.rs), split into chunks over all its threads.
  */
 export async function planTalisman(ev, params, api) {
   const maps = ev.ctx.m.$e
+  const rust = ev.ctx.rust
   const M = talismanModel(maps, params.typeHrid, { gradeWeights: params.gradeWeights })
-  const target = (params.target || []).filter(q => q?.hrid && M.types.some(x => x.hrid === q.hrid)).map(q => ({ hrid: q.hrid, min: Math.max(1, Math.min(M.maxGrade, Math.floor(q.min) || 1)) }))
+  const idx = Object.fromEntries(M.types.map((x, i) => [x.hrid, i]))
+  const target = (params.target || []).filter(q => q?.hrid && q.hrid in idx).map(q => ({ hrid: q.hrid, min: Math.max(1, Math.min(M.maxGrade, Math.floor(q.min) || 1)) }))
   if (!target.length) throw new Error(t("请填写目标词条"))
   if (new Set(target.map(q => q.hrid)).size !== target.length) throw new Error(t("目标里有重复的词条"))
   if (target.length > M.maxLines) throw new Error(t("目标最多 {n} 条", { n: M.maxLines }))
-  const start = { lines: (params.start?.lines || []).filter(l => l?.hrid && M.types.some(x => x.hrid === l.hrid)).map(l => ({ hrid: l.hrid, grade: Math.max(1, Math.min(M.maxGrade, Math.floor(l.grade) || 1)) })), lock: -1 }
-  if (params.start?.lockHrid) start.lock = start.lines.findIndex(l => l.hrid === params.start.lockHrid)
+  const lines = (params.start?.lines || []).filter(l => l?.hrid && l.hrid in idx).slice(0, M.maxLines).map(l => ({ hrid: l.hrid, grade: Math.max(1, Math.min(M.maxGrade, Math.floor(l.grade) || 1)) }))
+  const start = { lines, lock: params.start?.lockHrid ? lines.findIndex(l => l.hrid === params.start.lockHrid) : -1 }
   const prices = params.prices || {}
-  const runs = Math.max(50, Math.min(20000, Number(params.runs) || 400))
-  const seed = Number(params.seed || 20261112)
-  // a run that costs more than this is cut off (counts as failed): 50× the default strategy's median, at least 1B
-  let maxCost = Infinity
+  const runs = Math.max(64, Math.min(20000, Number(params.runs) || 400))
+  const seed = (Number(params.seed) || 20261112) >>> 0
+  const itemSlot = h => ITEM_ORDER.findIndex(k => ORBS[k] === h)
+  const base = {
+    model: {
+      types: M.types.map(x => ({ weight: x.weight, special: x.special })),
+      focusWeight: M.focusWeight, focusPickLimit: M.focusPickLimit, maxGrade: M.maxGrade, maxLines: M.maxLines,
+      caps: M.caps, mutateLines: M.mutateLines, attuneDown: M.attune.down, attuneUp: M.attune.up, gradeWeights: M.gradeWeights,
+      addCost: Object.fromEntries(Object.entries(M.addCost).map(([n, c]) => [n, { item: itemSlot(c.itemHrid), count: c.count }])),
+    },
+    start: { lines: start.lines.map(l => [idx[l.hrid], l.grade]), lock: start.lock },
+    target: target.map(q => [idx[q.hrid], q.min]),
+    prices: ITEM_ORDER.map(k => Number(prices[ORBS[k]]) || 0),
+  }
+  const job = async extra => {
+    if (api.signal?.aborted) throw new Error("cancelled")
+    return (await rust.run({ talisman: { ...base, ...extra } }, { attacks: false })).result
+  }
+  // a run that costs more than this is cut off (counts as not reached): 50× the default strategy's median, ≥ 1B
+  let maxCost = 1e15
   const cache = new Map()
   let done = 0
-  const evalSt = async (st, n = runs) => {
-    const key = JSON.stringify(st) + ":" + n
-    if (cache.has(key)) return cache.get(key)
-    const r = rng(seed)
-    const list = []
-    for (let i = 0; i < n; i++) {
-      list.push(runOnce(M, start, target, st, prices, r, { maxCost }))
-      if (i % 50 === 49) {
-        if (api.signal?.aborted) throw new Error("cancelled")
-        await new Promise(res => setTimeout(res, 0))
-      }
-    }
-    const s = { strategy: st, ...summarize(list) }
-    cache.set(key, s)
-    api.progress(++done, total, t("模拟洗练策略"))
-    return s
-  }
   const keys = Object.keys(OPTION_SETS)
   const total = 1 + 2 * keys.reduce((a, k) => a + OPTION_SETS[k].length - 1, 0) + 6
+  const evalSt = async (st, n = runs, salt = 0) => {
+    const key = JSON.stringify(st) + ":" + n
+    if (cache.has(key)) return cache.get(key)
+    const p = (async () => {
+      const chunks = Math.ceil(n / CHUNK)
+      const outs = await Promise.all(Array.from({ length: chunks }, (_, k) =>
+        job({ strategy: st, runs: Math.min(CHUNK, n - k * CHUNK), seed: (seed + salt * 1000003 + k * 7919) >>> 0, maxCost })))
+      const counts = ITEM_ORDER.map((_, i) => outs.reduce((a, o) => a + o.counts[i], 0))
+      const s = { strategy: st, ...summarize(outs.flatMap(o => o.costs), outs.reduce((a, o) => a + o.steps, 0), counts) }
+      api.progress(++done, total, t("模拟洗练策略"))
+      return s
+    })()
+    cache.set(key, p)
+    return p
+  }
+  const score = s => (s.success < 1 ? Infinity : s.mean)
+  const pick = (a, b) => (score(b) < score(a) || (!Number.isFinite(score(a)) && b.success > a.success) ? b : a)
   let best = await evalSt(DEFAULT_STRATEGY)
   if (Number.isFinite(best.median)) maxCost = Math.max(1e9, best.median * 50)
   const all = [best]
-  const score = s => (s.success < 1 ? Infinity : s.mean)
   for (let round = 0; round < 2; round++) {
     for (const k of keys) {
-      for (const v of OPTION_SETS[k]) {
-        if (v === best.strategy[k]) continue
-        const s = await evalSt({ ...best.strategy, [k]: v })
-        all.push(s)
-        if (score(s) < score(best) || (!Number.isFinite(score(best)) && s.success > best.success)) best = s
-      }
+      const list = await Promise.all(OPTION_SETS[k].filter(v => v !== best.strategy[k]).map(v => evalSt({ ...best.strategy, [k]: v })))
+      all.push(...list)
+      best = list.reduce(pick, best)
     }
   }
-  // the best few again with 4× the runs (a fresh seed), so the winner is not a lucky draw
+  // the best few again with 4× the runs (other seeds), so the winner is not a lucky draw
   const uniq = [...new Map(all.map(s => [JSON.stringify(s.strategy), s])).values()].sort((a, b) => score(a) - score(b) || b.success - a.success)
-  const top = []
-  for (const s of uniq.slice(0, 6)) top.push(await evalSt(s.strategy, runs * 4))
+  const top = await Promise.all(uniq.slice(0, 6).map(s => evalSt(s.strategy, runs * 4, 1)))
   top.sort((a, b) => score(a) - score(b) || b.success - a.success)
   api.progress(total, total, t("模拟洗练策略"))
-  // an example run of the winner whose cost is near its median
-  const r = rng(seed + 1)
-  let example = null
-  for (let i = 0; i < 200; i++) {
-    const x = runOnce(M, start, target, top[0].strategy, prices, r, { maxCost, log: true })
-    if (!example || Math.abs(x.cost - top[0].median) < Math.abs(example.cost - top[0].median)) example = x
-  }
+  // an example run of the winner whose cost is near its median: find it, then run again logging that one
+  const exSeed = (seed + 99991) >>> 0
+  const probe = await job({ strategy: top[0].strategy, runs: 200, seed: exSeed, maxCost })
+  const costs = probe.costs.map(x => (x < 0 ? Infinity : x))
+  let at = 0
+  for (let i = 1; i < costs.length; i++) if (Math.abs(costs[i] - top[0].median) < Math.abs(costs[at] - top[0].median)) at = i
+  const ex = await job({ strategy: top[0].strategy, runs: at + 1, seed: exSeed, maxCost, logRun: at })
+  const toLines = a => a.map(([i, g]) => ({ hrid: M.types[i].hrid, grade: g }))
+  const log = (ex.log || []).map(x => ({ op: x.op, taken: x.taken, lock: x.lock, lines: toLines(x.lines) }))
   return {
     target, start, gradeWeights: M.gradeWeights, maxCost,
-    best: { ...top[0], text: describe(top[0].strategy) },
+    best: { ...top[0], text: describe(top[0].strategy), plan: strategySteps(maps, top[0].strategy, target, start, top[0].counts) },
     top: top.map(s => ({ ...s, text: describe(s.strategy) })),
-    example: example && { cost: example.cost, steps: example.steps, log: example.log.slice(0, 400), truncated: example.log.length > 400 },
+    example: { cost: costs[at], steps: log.filter(x => x.op !== "add").length, log: log.slice(0, 400), truncated: log.length > 400 },
   }
 }
