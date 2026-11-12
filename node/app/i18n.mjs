@@ -38,6 +38,7 @@ function nameOf(maps, hrid) {
     combat_trigger_conditions: maps.combatTriggerConditionDetailMap,
     combat_trigger_dependencies: maps.combatTriggerDependencyDetailMap,
     combat_trigger_comparators: maps.combatTriggerComparatorDetailMap,
+    talisman_modifiers: maps.talismanModifierDetailMap,
   }[hrid.split("/")[1]]
   return map?.[hrid]?.name || ""
 }

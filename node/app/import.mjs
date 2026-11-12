@@ -5,7 +5,8 @@ import { t } from "./lang.mjs"
 import { combatLevel as combatLevelOf, normalizeConditions } from "./model.mjs"
 
 const LEVEL_KEYS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
-const SLOT_KEYS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket"]
+const SLOT_KEYS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket", "belt"]
+const TALISMAN_SLOTS = 3
 const NON_WEAPON = SLOT_KEYS.filter(s => s !== "weapon")
 const WEAPON_LOCATIONS = new Set(["/item_locations/main_hand", "/item_locations/two_hand"])
 const ABILITY_SLOTS = 5
@@ -38,6 +39,7 @@ export function emptyPlayer(id, maps) {
     drinks: ["", "", ""],
     abilities: Array.from({ length: 5 }, () => ({ abilityHrid: "", level: 1 })),
     abilityLevelMap: {},
+    talismans: [null, null, null],
     triggerMap: {},
     houseRooms: Object.fromEntries(Object.keys(maps.houseRoomDetailMap || {}).map(k => [k, 0])),
     guildBuffs: Object.fromEntries(combatGuildBuffs(maps).map(k => [k, 0])),
@@ -191,6 +193,34 @@ function equipmentFromItems(maps, items) {
     if (s) out[s] = { itemHrid: hrid, enhancementLevel: nonNeg(i?.enhancementLevel ?? n?.enhancementLevel) }
   }
   return out
+}
+
+/** One talisman as the config keeps it: { id, typeHrid, modifiers: [{ hrid, grade }] }. */
+function talismanEntry(x) {
+  const modifiers = list(x?.modifiers)
+    .map(m => ({ hrid: String(m?.hrid || ""), grade: Math.floor(num(m?.grade, 0)) }))
+    .filter(m => m.hrid && m.grade >= 1)
+  if (!modifiers.length) return null
+  return { id: x?.id ?? null, typeHrid: String(x?.talismanTypeHrid || x?.typeHrid || ""), modifiers }
+}
+
+/**
+ * Talismans of a character (init_character_data `characterTalismans`; slotIndex 0 = not slotted,
+ * 1..3 = belt slot) -> { slotted: [entry | null] × 3, library: combat talismans the character owns }.
+ */
+function talismansFrom(src) {
+  const all = list(src?.characterTalismans ?? src?.talismans ?? src?.equippedTalismans)
+  if (!all.length && !has(src, "characterTalismans")) return undefined
+  const slotted = Array.from({ length: TALISMAN_SLOTS }, () => null)
+  const library = []
+  for (const x of all) {
+    const e = talismanEntry(x)
+    if (!e) continue
+    const i = Math.floor(num(x?.slotIndex, 0))
+    if (i >= 1 && i <= TALISMAN_SLOTS) slotted[i - 1] = e
+    if (!e.typeHrid || e.typeHrid === "/talisman_types/combat") library.push(e)
+  }
+  return { slotted, library }
 }
 
 /** Every equipment item the character owns (worn or in the inventory), merged by hrid + level. */
@@ -435,6 +465,11 @@ function normalizePlayer(m, e, base) {
   if (Array.isArray(owned)) a.ownedEquipment = clone(owned)
   const lab = i.labyrinth ?? n.labyrinth
   if (lab && typeof lab === "object") a.labyrinth = clone(lab)
+  const tl = i.talismans ?? n.talismans
+  a.talismans = Array.from({ length: TALISMAN_SLOTS }, (_, k) => (Array.isArray(tl) && tl[k] ? talismanEntry(tl[k]) : null))
+  const lib = i.talismanLibrary ?? n.talismanLibrary
+  if (Array.isArray(lib)) a.talismanLibrary = lib.map(talismanEntry).filter(Boolean)
+  else delete a.talismanLibrary
   return a
 }
 
@@ -468,9 +503,14 @@ function fromCurrentCharacter(m, e, base) {
   const lu = labyrinthUpgrades(e?.characterInfo)
   if (lu !== undefined) p.labyrinthUpgrades = lu
   if (has(e, "characterItems")) p.ownedEquipment = ownedEquipment(maps, e.characterItems)
+  const tl = talismansFrom(e)
+  if (tl) {
+    p.talismans = tl.slotted
+    p.talismanLibrary = tl.library
+  }
   const lab = labyrinthFromState(m, e?.labyrinthState, p.ownedEquipment, p.abilityLevelMap, p.triggerMap, e, p.levels)
   if (lab) p.labyrinth = lab
-  return normalizePlayer(m, p, base)
+  return { ...normalizePlayer(m, p, base), talismansFromGame: !!tl }
 }
 
 /** `w0`: loadouts of a shared profile, most combat-relevant first. */
@@ -561,6 +601,9 @@ function fromSharedProfile(m, payload, base) {
   }
   const tm = sharedTriggerMap(m, ls)
   if (tm !== undefined) p.triggerMap = tm
+  // teammates: the profile's talisman field is not known yet (test server); take it when present
+  const tl = talismansFrom(e)
+  if (tl && tl.slotted.some(Boolean)) p.talismans = tl.slotted
   const h = houseRooms(e, base)
   if (h !== undefined) p.houseRooms = h
   const a = achievements(e)
@@ -569,7 +612,7 @@ function fromSharedProfile(m, payload, base) {
   if (g !== undefined) p.guildBuffs = g
   const gc = guildBuffCaps(maps, e)
   if (gc !== undefined) p.guildBuffCaps = gc
-  return normalizePlayer(m, p, base)
+  return { ...normalizePlayer(m, p, base), talismansFromGame: !!(tl && tl.slotted.some(Boolean)) }
 }
 
 /** `hu` for the two bridge formats. */

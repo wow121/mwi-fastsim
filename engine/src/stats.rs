@@ -86,9 +86,15 @@ stats! {
     75, MAX_MANAPOINTS_RATIO, "maxManapointsRatio";
     76, ABILITY_HASTE, "abilityHaste";
     77, TENACITY, "tenacity";
+    // talisman specials (test server 2026-11): only on talismans
+    78, SMITE, "smite";
+    79, SHATTER, "shatter";
+    80, OVERKILL, "overkill";
+    81, ECHO, "echo";
+    82, FORTIFY, "fortify";
 }
 
-pub const N_STATS: usize = 78;
+pub const N_STATS: usize = 83;
 
 pub fn stat_index(name: &str) -> Option<usize> {
     STAT_NAMES.iter().position(|n| *n == name)

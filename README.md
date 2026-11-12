@@ -20,7 +20,7 @@ The engine is a derivative of the community [MWI Combat Simulator](https://githu
 
 | 页面 | 做什么 |
 |---|---|
-| 队伍 | 从游戏同步的队伍，可以编辑装备、技能、食物饮料、触发条件，保存成配装方案 |
+| 队伍 | 从游戏同步的队伍，可以编辑装备、技能、食物饮料、触发条件、符石，保存成配装方案 |
 | 模拟 | 用多个随机种子模拟，给出每人每天的利润、经验、死亡次数，以及收入和支出明细；死亡分析（被谁的哪个技能打死、受到的伤害来源）；按当前经验算升级要多久；结果可以复制成文字或存成图片 |
 | 刷图推荐 | 所有区域、地下城和难度一起跑，按利润或经验排序；每行可展开看每个成员的数据和主要收入、消耗；结果可以复制成文字或存成图片 |
 | 技能与触发优化 | 整队的技能组合、施放顺序和触发阈值，按职业的可用技能搜索 |
@@ -123,6 +123,9 @@ userscript/        油猴脚本
 本地服务把它保存在 `node/data/envelope.json`，浏览器版保存在 IndexedDB。
 还没同步过时，使用网站内置的一份游戏数据（`web/public/data/gamedata.json`），所以不装脚本也能用装备获取成本等功能；同步后自动换成游戏里的最新数据。
 
+测试服有正式服还没有的内容时（例如腰带和符石），`web/public/data/gamedata-test.json` 是测试服的游戏数据（由 mwi-gamedata 生成），
+左侧栏打开「测试服数据」就改用它。正式服同步来的数据照常保存，关掉开关就换回去。
+
 ## 测试
 
 在 `node/` 目录下运行。需要先同步过一次游戏，测试会用到 `data/envelope.json` 和 `data/team.json`。
@@ -133,6 +136,7 @@ userscript/        油猴脚本
 | `node test-import.mjs` | 游戏数据导入的往返测试 |
 | `node browser-test.mjs` | 用无头 Edge / Chrome 运行浏览器版，和本地服务的结果比对 |
 | `node check-prims.mjs` | Rust 的随机数和 `pow` 与 V8 逐位比对 |
+| `node engine-diff.mjs <旧引擎>` | 改引擎后：同一队伍在多个区域、难度、种子下，新旧两个原生引擎的结果逐字节一致（旧引擎用 `git archive` 取出旧版本单独编译） |
 | `node check-i18n.mjs` | 界面翻译：没有英文的 `t()` 键、没包在 `t()` 里的中文、占位符对不上的英文（不需要游戏数据） |
 | `node smoke.mjs` 等 | 接口和各优化器的端到端测试（另有 `test-upgrades.mjs`、`test-goal.mjs`、`test-gear-cost.mjs`、`test-labyrinth.mjs`、`test-statvalue.mjs`、`test-scrolls.mjs`） |
 

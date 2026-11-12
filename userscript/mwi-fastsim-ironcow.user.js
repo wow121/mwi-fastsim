@@ -2,7 +2,7 @@
 // @name         MWI 战斗工具 · 铁牛导入
 // @name:en      MWI Combat Tools · Ironcow import
 // @namespace    mwi-fastsim-ironcow
-// @version      0.1.3
+// @version      0.1.4
 // @description  游戏页面：读取当前铁牛角色（战斗配置 + 生活技能、工具装备、茶、房子、社区加成），导入到 MWI 战斗工具的「铁牛模式」，和普通队伍分开保存
 // @description:en Game page: reads the current ironcow character (combat setup + gathering/production skills, tools, teas, houses, community buffs) into the Ironcow mode of MWI Combat Tools, kept apart from the normal team
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上、或在本机静态运行（如 http://localhost:5173）时，照下面的写法加一行 @match。
@@ -52,7 +52,7 @@
   const CAPTURES = "fastsim_ironcow_captures_v1"
   const CLIENT_DATA = "fastsim_ironcow_client_data_v1"
   // what the ironcow import needs of the logged-in character (init_character_data)
-  const FIELDS = ["character", "characterSkills", "characterItems", "combatUnit", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap",
+  const FIELDS = ["character", "characterSkills", "characterItems", "characterTalismans", "combatUnit", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap",
     "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "characterHouseRoomMap",
     "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
 

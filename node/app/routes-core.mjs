@@ -64,6 +64,17 @@ export function teamFromSite(body) {
 /** Team from the game page's envelope (current character + teammates' shared profiles). */
 export function teamFromGame(m, envelope, prev) {
   const { players, missing, problems } = importTeam(m, envelope)
+  // Belt and talismans set by hand (test-server preview) survive a sync from a game without them:
+  // a member whose data has no talismans keeps the previous belt / talismans of the same name.
+  for (const pl of players) {
+    const old = (prev?.members || []).find(o => o.name === pl.name)
+    if (!pl.talismansFromGame && old && !pl.equipment?.belt?.itemHrid) {
+      if (old.equipment?.belt?.itemHrid) pl.equipment.belt = { ...old.equipment.belt }
+      if (Array.isArray(old.talismans)) pl.talismans = JSON.parse(JSON.stringify(old.talismans))
+      if (Array.isArray(old.talismanLibrary) && !pl.talismanLibrary) pl.talismanLibrary = JSON.parse(JSON.stringify(old.talismanLibrary))
+    }
+    delete pl.talismansFromGame
+  }
   if (!players.length) throw new Error(t("没有可导入的角色") + (problems.length ? t("：") + problems.join(SEP()) : ""))
   const team = {
     members: players,

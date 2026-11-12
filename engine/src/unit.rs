@@ -241,6 +241,12 @@ pub struct Unit {
     pub debuff_on_level_gap: f64,
     pub task_damage_enabled: bool,
     pub difficulty_tier: f64,
+    /// `damageTaken` from the player's own gear / talismans (0 for monsters); buffs add to it
+    pub base_damage_taken: f64,
+    /// Overkill: true damage stored by a killing blow, added to the next direct hit
+    pub overkill_store: f64,
+    /// Fortify: expiry time of each of the 4 stacks
+    pub fortify_exp: [f64; 4],
 }
 
 impl Unit {
@@ -276,6 +282,9 @@ impl Unit {
             debuff_on_level_gap: 0.0,
             task_damage_enabled: false,
             difficulty_tier: 0.0,
+            base_damage_taken: 0.0,
+            overkill_store: 0.0,
+            fortify_exp: [f64::NEG_INFINITY; 4],
         }
     }
 
@@ -474,7 +483,7 @@ impl Unit {
         self.silence_expire = None;
         self.blinded = false;
         self.blind_expire = None;
-        self.s[DAMAGE_TAKEN] = 0.0;
+        self.s[DAMAGE_TAKEN] = self.base_damage_taken;
     }
 
     /// Buffs of the types `updateCombatDetails` reads, bucketed by type in `combatBuffs`
@@ -621,7 +630,7 @@ impl Unit {
             ev += s * b_ratio;
         }
         self.d.eva[IDX_RANGED] = ev;
-        self.s[DAMAGE_TAKEN] = bk.boost(bt::DAMAGE_TAKEN).1;
+        self.s[DAMAGE_TAKEN] = self.base_damage_taken + bk.boost(bt::DAMAGE_TAKEN).1;
         self.d.acc[IDX_MAGIC] =
             (10.0 + att) * (1.0 + self.s[MAGIC_ACCURACY]) * (1.0 + n) * (1.0 + i);
         self.d.max_dmg[IDX_MAGIC] =

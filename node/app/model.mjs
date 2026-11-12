@@ -6,7 +6,8 @@ import { zh } from "./i18n.mjs"
 import { t } from "./lang.mjs"
 
 export const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
-export const EQUIPMENT_SLOTS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket"]
+export const EQUIPMENT_SLOTS = ["head", "body", "legs", "feet", "hands", "weapon", "off_hand", "pouch", "neck", "earrings", "ring", "back", "charm", "trinket", "belt"]
+export const TALISMAN_SLOTS = 3
 const MAX_CONDITIONS = 4
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
@@ -70,7 +71,8 @@ export function equipmentDTO(m, cfg) {
   const eq = {}
   for (const [slot, e] of Object.entries(cfg.equipment ?? {})) {
     const hrid = e?.itemHrid || ""
-    if (!hrid || !EQUIPMENT_SLOTS.includes(slot)) continue
+    // items missing from the game data (e.g. test-server belts while the live data is in use) are skipped
+    if (!hrid || !EQUIPMENT_SLOTS.includes(slot) || !m.$e.itemDetailMap[hrid]) continue
     const lvl = Math.max(0, Math.floor(Number(e?.enhancementLevel ?? 0)) || 0)
     if (slot === "weapon") {
       const t = weaponType(m, hrid)
@@ -80,6 +82,20 @@ export function equipmentDTO(m, cfg) {
     eq[`/equipment_types/${slot}`] = { hrid, enhancementLevel: lvl }
   }
   return eq
+}
+
+/** Slotted talismans of a config (index = slot - 1), modifiers the game data knows only. */
+export function talismansDTO(m, cfg) {
+  const mods = m.$e.talismanModifierDetailMap
+  if (!mods || !Array.isArray(cfg.talismans)) return []
+  const list = Array.from({ length: TALISMAN_SLOTS }, (_, i) => {
+    const tl = cfg.talismans[i]
+    const modifiers = (tl?.modifiers || [])
+      .filter(x => mods[x?.hrid] && x.grade >= 1)
+      .map(x => ({ hrid: x.hrid, grade: Math.floor(x.grade) }))
+    return modifiers.length ? { modifiers } : null
+  })
+  return list.some(Boolean) ? list : []
 }
 
 /** Food/drink slots granted by the equipment (pouch). */
@@ -101,6 +117,7 @@ export function playerDTO(m, cfg, index) {
     rangedLevel: lv.ranged,
     magicLevel: lv.magic,
     equipment: equipmentDTO(m, cfg),
+    talismans: talismansDTO(m, cfg),
     food: [null, null, null],
     drinks: [null, null, null],
     abilities: [null, null, null, null, null],

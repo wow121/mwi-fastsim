@@ -220,6 +220,10 @@ pub struct Sim<'a> {
     s_retaliation: u32,
     s_physical_thorns: u32,
     s_elemental_thorns: u32,
+    /// Fortify stack uniques: [stack][armor, water, nature, fire]
+    u_fortify: [[u32; 4]; 4],
+    /// Echo: damage / healing multiplier of the effects being processed (0.5 while echoing)
+    echo_mult: f64,
     pub events_processed: u64,
 }
 
@@ -233,6 +237,9 @@ fn two<T>(v: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
         (&mut y[0], &mut x[b])
     }
 }
+
+const FORTIFY_DURATION: f64 = 5e9;
+const ECHO_MULT: f64 = 0.5;
 
 struct AttackOut {
     damage_done: f64,
@@ -257,6 +264,12 @@ impl<'a> Sim<'a> {
         let u_weaken = it.id("/buff_uniques/weaken");
         let u_enrage_dmg = it.id("/buff_uniques/enrage_damage");
         let u_enrage_acc = it.id("/buff_uniques/enrage_accuracy");
+        let mut u_fortify = [[0u32; 4]; 4];
+        for (k, row) in u_fortify.iter_mut().enumerate() {
+            for (j, name) in ["armor", "water", "nature", "fire"].iter().enumerate() {
+                row[j] = it.id(&format!("/buff_uniques/fortify_{}_{}", name, k));
+            }
+        }
 
         let zone = match sc.get("zone") {
             Some(z @ Value::Object(_)) => Some(Zone::parse(z)),
@@ -322,6 +335,8 @@ impl<'a> Sim<'a> {
             s_retaliation: special[7],
             s_physical_thorns: special[8],
             s_elemental_thorns: special[9],
+            u_fortify,
+            echo_mult: 1.0,
             events_processed: 0,
         };
         let mut ids = Vec::new();
@@ -361,7 +376,9 @@ impl<'a> Sim<'a> {
             drink_slots: num(p, "drinkSlots"),
             bulwark: matches!(p.get("bulwark"), Some(Value::Bool(true))),
         };
+        let base_dt = ps.equip.iter().find(|(i, _)| *i == DAMAGE_TAKEN).map(|x| x.1).unwrap_or(0.0);
         let mut u = Unit::new_player(&string(p, "hrid"), ps);
+        u.base_damage_taken = base_dt;
         u.hid = self.it.id(&string(p, "hrid"));
         if let Some(Value::Array(lv)) = p.get("levels") {
             for (i, x) in lv.iter().enumerate().take(7) {
@@ -1041,6 +1058,8 @@ impl<'a> Sim<'a> {
         eff: Option<&Effect>,
     ) -> Result<AttackOut, SimErr> {
         let _prof = crate::prof::start("process_attack");
+        let echo_mult = self.echo_mult;
+        let now = self.time;
         let (e, t) = two(&mut self.units, src, tgt);
         let rng = &mut self.rng;
         let pow14 = &mut self.pow14;
@@ -1110,15 +1129,22 @@ impl<'a> Sim<'a> {
         let j = eff.map(|i| i.armor_damage_ratio * e.d.total_armor).unwrap_or(0.0);
         let mut lo = c * (1.0 + n_flat + j);
         let mut hi = c * (j_ratio * s + n_flat + j);
-        if rng.next() < k {
+        let crit = rng.next() < k;
+        if crit {
             hi = hi * (1.0 + pe);
             lo = hi;
         }
         let mut q = random_int(rng, lo, hi);
         q *= 1.0 + if e.task_damage_enabled { e.s[TASK_DAMAGE] } else { 0.0 };
         q *= 1.0 + t.s[DAMAGE_TAKEN];
+        // Smite (talisman): more damage to bosses
+        if e.s[SMITE] > 0.0 && matches!(&t.kind, Kind::Monster { tpl, .. } if tpl.is_boss) {
+            q *= 1.0 + e.s[SMITE];
+        }
         if eff.is_some() {
             q *= 1.0 + e.s[ABILITY_DAMAGE];
+            // Echo (talisman): the repeat of an ability's damage hits at half strength
+            q *= echo_mult;
         } else {
             q += q * e.s[AUTO_ATTACK_DAMAGE];
         }
@@ -1127,6 +1153,8 @@ impl<'a> Sim<'a> {
         let mut hit = false;
         if rng.next() < f {
             hit = true;
+            // Shatter (talisman): critical hits gain armor / resistance penetration
+            let pen = if crit && e.s[SHATTER] > 0.0 { pen + e.s[SHATTER] } else { pen };
             let mut tt = g;
             if pen > 0.0 && g > 0.0 {
                 tt = g / (1.0 + pen);
@@ -1135,9 +1163,45 @@ impl<'a> Sim<'a> {
             if tt < 0.0 {
                 w = (100.0 - tt) / 100.0;
             }
-            let de = (w * q).ceil();
-            dmg = js::min(de, t.d.hp);
+            let mut de = (w * q).ceil();
+            // Overkill (talisman): stored excess of a killing blow lands as true damage on the next hit
+            if e.overkill_store > 0.0 {
+                de += e.overkill_store;
+                e.overkill_store = 0.0;
+            }
+            let hp0 = t.d.hp;
+            dmg = js::min(de, hp0);
             t.d.hp -= dmg;
+            if e.s[OVERKILL] > 0.0 && de > hp0 {
+                e.overkill_store += (e.s[OVERKILL] * (de - hp0)).floor();
+            }
+            // Fortify (talisman): when hit, +X armor and resistances for 5 s, up to 4 stacks
+            // (each stack has its own timer; at 4 stacks the oldest one is renewed)
+            if t.s[FORTIFY] > 0.0 && t.d.hp > 0.0 {
+                let mut k = 0;
+                for j in 1..4 {
+                    if t.fortify_exp[j] < t.fortify_exp[k] {
+                        k = j;
+                    }
+                }
+                t.fortify_exp[k] = now + FORTIFY_DURATION;
+                let x = t.s[FORTIFY];
+                let types = [bt::ARMOR, bt::WATER_RESISTANCE, bt::NATURE_RESISTANCE, bt::FIRE_RESISTANCE];
+                let list: SmallVec<[BuffTemplate; 4]> = (0..4)
+                    .map(|j| BuffTemplate {
+                        unique: self.u_fortify[k][j],
+                        typ: types[j],
+                        ratio: x,
+                        flat: 0.0,
+                        duration: FORTIFY_DURATION,
+                        has_multiplier_skill: false,
+                        multiplier_skill: None,
+                        multiplier_per_level: 0.0,
+                    })
+                    .collect();
+                t.add_buffs(&list, now);
+                self.q.add(now + FORTIFY_DURATION, Ev::CheckBuffExpiration { source: tgt });
+            }
         }
         if p > 0.0 && g > -99.0 {
             let mut tt = u;
@@ -2073,6 +2137,24 @@ impl<'a> Sim<'a> {
                 }
             }
         }
+        // Echo (talisman): chance to repeat the cast ability's damage / healing at half strength.
+        // Only the damage and heal effects run again (no buffs, stuns, damage over time).
+        if self.units[e].s[ECHO] > 0.0 && self.units[e].d.hp > 0.0 && self.rng.next() < self.units[e].s[ECHO] {
+            self.echo_mult = ECHO_MULT;
+            let mut r = Ok(());
+            for eff in def.effects.iter() {
+                r = match eff.kind {
+                    EffectKind::Damage => self.ability_damage(e, &def, eff),
+                    EffectKind::Heal => self.ability_heal(e, &def, eff),
+                    _ => Ok(()),
+                };
+                if r.is_err() {
+                    break;
+                }
+            }
+            self.echo_mult = 1.0;
+            r?;
+        }
         if self.units[e].s[RIPPLE] > 0.0 && self.rng.next() < self.units[e].s[RIPPLE] {
             let a = self.units[e].add_mp(10.0);
             let h = self.units[e].hid;
@@ -2209,7 +2291,8 @@ impl<'a> Sim<'a> {
                 if g.hp_drain > 0.0 {
                     self.res.add_hp_gained(eh, t.hid, g.hp_drain);
                 }
-                if g.did_hit {
+                let echo = self.echo_mult != 1.0;
+                if g.did_hit && !echo {
                     if let Some(bs) = &i.buffs {
                         for p in bs {
                             self.units[u].add_buff(p, self.time);
@@ -2218,7 +2301,7 @@ impl<'a> Sim<'a> {
                         }
                     }
                 }
-                if i.dot_ratio > 0.0 && g.damage_done > 0.0 {
+                if !echo && i.dot_ratio > 0.0 && g.damage_done > 0.0 {
                     self.q.add(
                         self.time + DOT_TICK,
                         Ev::Dot {
@@ -2231,6 +2314,7 @@ impl<'a> Sim<'a> {
                     );
                 }
                 if g.did_hit
+                    && !echo
                     && i.stun_chance > 0.0
                     && self.rng.next()
                         < (i.stun_chance * 100.0) / (100.0 + self.units[u].s[TENACITY])
@@ -2244,6 +2328,7 @@ impl<'a> Sim<'a> {
                     self.q.add(exp, Ev::StunExp { source: u });
                 }
                 if g.did_hit
+                    && !echo
                     && i.blind_chance > 0.0
                     && self.rng.next()
                         < (i.blind_chance * 100.0) / (100.0 + self.units[u].s[TENACITY])
@@ -2262,6 +2347,7 @@ impl<'a> Sim<'a> {
                     self.q.add(exp, Ev::BlindExp { source: u });
                 }
                 if g.did_hit
+                    && !echo
                     && i.silence_chance > 0.0
                     && self.rng.next()
                         < (i.silence_chance * 100.0) / (100.0 + self.units[u].s[TENACITY])
@@ -2330,7 +2416,10 @@ impl<'a> Sim<'a> {
         let s = i.damage_ratio;
         let l = a * (1.0 + o);
         let c = a * (s * n + o);
-        let v = random_int(&mut self.rng, l, c);
+        let mut v = random_int(&mut self.rng, l, c);
+        if self.echo_mult != 1.0 {
+            v = (v * self.echo_mult).floor();
+        }
         Ok(self.units[target].add_hp(v))
     }
 

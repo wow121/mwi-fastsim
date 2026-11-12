@@ -5,9 +5,11 @@ import { abilityName, call, clone, itemName, loadState, saveTeam, store } from "
 import { dateTime, joinList, t, tk } from "../i18n.js"
 import TriggerEditor from "../components/TriggerEditor.vue"
 
-const SLOTS = [["weapon", tk("武器")], ["off_hand", tk("副手")], ["head", tk("头")], ["body", tk("身体")], ["legs", tk("腿")], ["hands", tk("手")], ["feet", tk("脚")], ["back", tk("背")], ["neck", tk("项链")], ["earrings", tk("耳环")], ["ring", tk("戒指")], ["pouch", tk("袋子")], ["charm", tk("护符")], ["trinket", tk("饰品")]]
+const SLOTS = [["weapon", tk("武器")], ["off_hand", tk("副手")], ["head", tk("头")], ["body", tk("身体")], ["legs", tk("腿")], ["hands", tk("手")], ["feet", tk("脚")], ["back", tk("背")], ["neck", tk("项链")], ["earrings", tk("耳环")], ["ring", tk("戒指")], ["pouch", tk("袋子")], ["charm", tk("护符")], ["trinket", tk("饰品")], ["belt", tk("腰带")]]
 const SKILLS = [["stamina", tk("耐力")], ["intelligence", tk("智力")], ["attack", tk("攻击")], ["melee", tk("近战")], ["defense", tk("防御")], ["ranged", tk("远程")], ["magic", tk("魔法")]]
 const o = computed(() => store.options)
+// the belt slot only with game data that has belts (test-server data for now)
+const slots = computed(() => SLOTS.filter(([s]) => s !== "belt" || o.value.equipment.belt?.length))
 const dirty = ref(false)
 const editing = ref(store.team.members[0]?.id ?? null)
 const member = computed(() => store.team.members.find(m => m.id === editing.value))
@@ -65,6 +67,49 @@ function setAbilityLevel(a) {
   if (a.abilityHrid) m.abilityLevelMap = { ...(m.abilityLevelMap || {}), [a.abilityHrid]: a.level }
   dirty.value = true
 }
+// ---- talismans: member.talismans[slot - 1] = { modifiers: [{ hrid, grade }] } | null
+const GROUPS = [["offense", tk("进攻词条")], ["defense", tk("防御词条")], ["utility", tk("辅助词条")], ["special", tk("特殊词条")]]
+const modGroups = computed(() => GROUPS.map(([key, label]) => ({ key, label: t(label), list: (o.value.talismanModifiers || []).filter(x => x.group === key) })).filter(g => g.list.length))
+const modInfo = computed(() => Object.fromEntries((o.value.talismanModifiers || []).map(x => [x.hrid, x])))
+const belt = computed(() => {
+  const e = member.value?.equipment?.belt
+  const b = e?.itemHrid ? o.value.belts?.[e.itemHrid] : null
+  if (!b) return { slots: 0, power: 0 }
+  return { slots: b.slots, power: b.power + b.bonus * (o.value.enhancementBonus?.[e.enhancementLevel || 0] || 0) }
+})
+const mod = (k, j) => member.value?.talismans?.[k]?.modifiers?.[j] || { hrid: "", grade: 1 }
+function setMod(k, j, field, v) {
+  const m = member.value
+  m.talismans = Array.from({ length: 3 }, (_, i) => m.talismans?.[i] || null)
+  const tl = (m.talismans[k] ||= { modifiers: [] })
+  const list = tl.modifiers
+  if (field === "hrid" && !v) list.splice(j, 1)
+  else if (j >= list.length) list.push({ hrid: field === "hrid" ? v : "", grade: field === "grade" ? v : 1 })
+  else list[j] = { ...list[j], [field]: v }
+  tl.modifiers = list.filter(x => x.hrid)
+  if (!tl.modifiers.length) m.talismans[k] = null
+  dirty.value = true
+}
+function pickTalisman(k, i) {
+  const m = member.value
+  m.talismans = Array.from({ length: 3 }, (_, x) => m.talismans?.[x] || null)
+  m.talismans[k] = clone(m.talismanLibrary[i])
+  dirty.value = true
+}
+function clearTalisman(k) {
+  const m = member.value
+  if (!m.talismans?.[k]) return
+  m.talismans = m.talismans.map((x, i) => (i === k ? null : x))
+  dirty.value = true
+}
+const fmtMod = (x, v) => (x.isPercent ? `+${(v * 100).toFixed(2).replace(/\.?0+$/, "")}%` : `+${Number(v.toFixed(2))}`)
+function modValue(k, j) {
+  const m = mod(k, j)
+  const x = modInfo.value[m.hrid]
+  const v = x?.gradeValues?.[m.grade - 1]
+  return x && Number.isFinite(v) ? fmtMod(x, v * (1 + belt.value.power)) : ""
+}
+const talismanLabel = tl => tl.modifiers.map(m => `${modInfo.value[m.hrid]?.name || m.hrid} G${m.grade}`).join(" / ")
 // house rooms / guild buffs: missing keys read as 0, writes create the map
 function setHouse(h, v) {
   member.value.houseRooms = { ...(member.value.houseRooms || {}), [h]: Math.max(0, Math.floor(Number(v) || 0)) }
@@ -153,7 +198,7 @@ async function deleteLoadout(l) {
       <el-tabs v-if="member" @tab-change="() => {}">
         <el-tab-pane :label="t('装备')">
           <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(330px, 1fr))">
-            <div v-for="[slot, label] in SLOTS" :key="slot" class="row">
+            <div v-for="[slot, label] in slots" :key="slot" class="row">
               <span style="width: 40px" class="muted">{{ t(label) }}</span>
               <el-select v-model="ensureSlot(member, slot).itemHrid" filterable clearable size="small" style="width: 200px" @change="dirty = true">
                 <el-option v-for="it in o.equipment[slot] || []" :key="it.hrid" :label="it.name" :value="it.hrid" />
@@ -161,6 +206,32 @@ async function deleteLoadout(l) {
               <el-input-number v-model="ensureSlot(member, slot).enhancementLevel" :min="0" :max="o.enhancementCap" size="small" style="width: 80px" @change="dirty = true" />
             </div>
           </div>
+        </el-tab-pane>
+        <el-tab-pane v-if="o.talismanModifiers?.length" :label="t('符石')">
+          <div class="muted" style="margin-bottom: 10px">
+            {{ belt.slots ? t("腰带：{n} 个符石槽，符石威力 +{p}%（词条数值 ×{m}）", { n: belt.slots, p: (belt.power * 100).toFixed(1), m: (1 + belt.power).toFixed(3) }) : t("没有装腰带：符石不生效。先在「装备」里选腰带。") }}
+          </div>
+          <div v-for="k in 3" :key="k" style="margin-bottom: 14px">
+            <div class="row" style="margin-bottom: 4px">
+              <b>{{ t("符石槽 {i}", { i: k }) }}</b>
+              <span v-if="k > belt.slots" class="bad">{{ t("腰带没有这个槽，不生效") }}</span>
+              <el-select v-if="member.talismanLibrary?.length" :model-value="null" :placeholder="t('从角色的符石里选')" size="small" style="width: 300px" @update:model-value="v => pickTalisman(k - 1, v)">
+                <el-option v-for="(x, i) in member.talismanLibrary" :key="i" :label="talismanLabel(x)" :value="i" />
+              </el-select>
+              <el-button v-if="member.talismans?.[k - 1]" size="small" text type="danger" @click="clearTalisman(k - 1)">{{ t("清空") }}</el-button>
+            </div>
+            <div v-for="j in Math.min(o.talismanMaxModifiers, (member.talismans?.[k - 1]?.modifiers?.length || 0) + 1)" :key="j" class="row" style="margin-bottom: 4px">
+              <el-select :model-value="mod(k - 1, j - 1).hrid" filterable clearable size="small" style="width: 200px" :placeholder="t('词条')" @update:model-value="v => setMod(k - 1, j - 1, 'hrid', v)">
+                <el-option-group v-for="g in modGroups" :key="g.key" :label="g.label">
+                  <el-option v-for="x in g.list" :key="x.hrid" :label="x.name" :value="x.hrid" />
+                </el-option-group>
+              </el-select>
+              <span class="muted">{{ t("品级") }}</span>
+              <el-input-number :model-value="mod(k - 1, j - 1).grade" :min="1" :max="6" size="small" style="width: 90px" :disabled="!mod(k - 1, j - 1).hrid" @change="v => setMod(k - 1, j - 1, 'grade', v)" />
+              <span>{{ modValue(k - 1, j - 1) }}</span>
+            </div>
+          </div>
+          <div class="muted">{{ t("同一属性在几个符石上会直接相加。制裁、破甲、过量伤害、回响、坚守按游戏里的说明模拟，细节等正式服上线后再核对。") }}</div>
         </el-tab-pane>
         <el-tab-pane :label="t('技能')">
           <div v-for="(a, i) in member.abilities" :key="i" class="row" style="margin-bottom: 6px">

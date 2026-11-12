@@ -2,7 +2,7 @@
 // @name         MWI 战斗工具
 // @name:en      MWI Combat Tools
 // @namespace    mwi-fastsim
-// @version      0.4.10
+// @version      0.4.11
 // @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
 // @description:en Game page: reads your character and teammates for the local tool / web version (wow121.github.io/mwi-fastsim); combat sim site: runs simulations on the local Rust engine
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上、或在本机静态运行（如 http://localhost:5173）时，照下面的写法加一行 @match。
@@ -199,10 +199,15 @@
     function compactProfile(profile, isCurrent) {
       const src = profile && profile.profile ? profile.profile : profile || {}
       const fields = isCurrent
-        ? ["character", "characterInfo", "characterSkills", "characterItems", "combatUnit", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap", "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "characterHouseRoomMap", "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
+        ? ["character", "characterInfo", "characterSkills", "characterItems", "characterTalismans", "combatUnit", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap", "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "characterHouseRoomMap", "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
         : ["name", "characterName", "sharableCharacter", "characterSkills", "wearableItemMap", "equippedAbilities", "characterAbilities", "characterAbilityMap", "abilityMap", "combatAbilityMap", "actionTypeFoodSlotsMap", "actionTypeDrinkSlotsMap", "consumableCombatTriggersMap", "abilityCombatTriggersMap", "currentCombatLoadout", "combatLoadout", "currentLoadout", "loadout", "characterLoadoutMap", "characterHouseRoomMap", "characterAchievements", "characterGuildBuffMap", "guildBuildingLevelMap", "communityBuffTypeMap", "communityBuffMap", "communityBuffs"]
       const out = {}
       for (const k of fields) if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = clone(src[k])
+      // talismans (belt update): the field names of a teammate's profile are not known yet, keep any
+      for (const k of Object.keys(src)) {
+        if (!/talisman/i.test(k) || Object.prototype.hasOwnProperty.call(out, k)) continue
+        try { if (JSON.stringify(src[k]).length <= 50000) out[k] = clone(src[k]) } catch {}
+      }
       if (!isCurrent) {
         // the profile page shows the teammate's own guild buff levels: keep every guild field
         // whatever it's called (small ones only, not member lists)

@@ -18,6 +18,8 @@ const PLAYER_KEYS = [
   "drinkConcentration", "autoAttackDamage", "abilityDamage", "staminaExperience",
   "intelligenceExperience", "attackExperience", "defenseExperience", "meleeExperience",
   "rangedExperience", "magicExperience", "retaliation",
+  // talismans (damageTaken: negative = less damage taken)
+  "damageTaken", "smite", "shatter", "overkill", "echo", "fortify",
 ]
 const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
 
@@ -68,6 +70,7 @@ export function scenarioPlayer(p) {
   }
   // extra stats on top of the equipment (stat value analysis)
   for (const [k, v] of Object.entries(p.statBonus || {})) if (k in equipStats) equipStats[k] += Number(v) || 0
+  for (const [k, v] of Object.entries(p.talismanStats || {})) if (k in equipStats) equipStats[k] += v
   const pouch = eq["/equipment_types/pouch"]
   const charm = eq["/equipment_types/charm"]
   return {

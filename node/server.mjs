@@ -53,6 +53,11 @@ let ctx = null // { m: Game, rust, gdHash, book, ev }
 let loading = null
 let market = readJson(path.join(DATA, "market.json"), null)
 
+// test-server game data (belts / talismans preview), shipped with the web app; on when settings.testData
+const BUNDLED = path.join(here, "..", "web", "public", "data", "gamedata.json")
+const TEST_DATA = path.join(here, "..", "web", "public", "data", "gamedata-test.json")
+let useTest = !!readJson(path.join(DATA, "settings.json"), {}).testData && fs.existsSync(TEST_DATA)
+
 const NO_DATA = "还没有游戏数据：装好油猴脚本后打开一次游戏页面（会自动读取），或在模拟网站上点“网站队伍同步到本地”"
 
 function writeGameData(game) {
@@ -89,20 +94,30 @@ async function ensureEngine() {
   if (ctx) return ctx
   if (!loading) {
     // synced from the game, else the game data shipped with the web app
-    const env = readJson(path.join(DATA, "envelope.json"), null) || readJson(path.join(here, "..", "web", "public", "data", "gamedata.json"), null)
+    const env = chosenEnvelope()
     if (!env) throw new Error(NO_DATA)
     loading = useGameData(env).finally(() => { loading = null })
   }
   return loading
 }
 
-/** New game data from the game page / the sim site: keep it and use it. */
+/** The game data to run on: the test-server data when switched on, else synced from the game, else bundled. */
+function chosenEnvelope() {
+  return (useTest && readJson(TEST_DATA, null)) || readJson(path.join(DATA, "envelope.json"), null) || readJson(BUNDLED, null)
+}
+
+/** New game data from the game page / the sim site: keep it and use it (kept only while on test data). */
 let lastEnvelopeKey = ""
 async function applyEnvelope(envelope) {
   if (!envelope) return ensureEngine()
   // the sim site sends its game data with every simulation: only switch when it is a new capture
   const key = `${envelope.gameVersion}|${envelope.versionTimestamp}|${envelope.capturedAt}`
   if (ctx && key === lastEnvelopeKey) return ctx
+  if (useTest) {
+    writeJson(path.join(DATA, "envelope.json"), envelope)
+    lastEnvelopeKey = key
+    return ensureEngine()
+  }
   const st = await useGameData(envelope)
   writeJson(path.join(DATA, "envelope.json"), envelope)
   lastEnvelopeKey = key
@@ -178,7 +193,7 @@ async function api(req, url, body) {
   if (p === "/api/state" && req.method === "GET") {
     return {
       team: loadTeam(),
-      engine: ctx ? { mode: ctx.mode, gameVersion: ctx.m.version, bundled: ctx.m.envelope.source === "bundled", gameData: ctx.gdHash, threads: THREADS } : null,
+      engine: ctx ? { mode: ctx.mode, gameVersion: ctx.m.version, bundled: ctx.m.envelope.source === "bundled", gameData: ctx.gdHash, threads: THREADS, test: useTest, testAvailable: fs.existsSync(TEST_DATA) } : null,
       market: market ? { timestamp: market.timestamp } : null,
     }
   }
@@ -203,6 +218,18 @@ async function api(req, url, body) {
     writeJson(path.join(DATA, "team.json"), team)
     log(`team from game: ${team.members.map(pl => `${pl.name}(${pl.source})`).join(", ")}${team.missing.length ? `; missing ${team.missing.join(", ")}` : ""}`)
     return reply
+  }
+  if (p === "/api/gamedata" && req.method === "PUT") {
+    // switch between the live game data and the test-server preview
+    useTest = !!body.test && fs.existsSync(TEST_DATA)
+    writeJson(path.join(DATA, "settings.json"), { ...readJson(path.join(DATA, "settings.json"), {}), testData: useTest })
+    // an engine start already under way would finish on the other data afterwards
+    if (loading) await loading.catch(() => {})
+    const env = chosenEnvelope()
+    if (!env) throw new Error(NO_DATA)
+    const st = await useGameData(env)
+    log(`game data: ${useTest ? "test server" : "live"} ${st.m.version}`)
+    return { test: useTest }
   }
   if (p === "/api/team" && req.method === "PUT") {
     writeJson(path.join(DATA, "team.json"), { ...loadTeam(), ...body })

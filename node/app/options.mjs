@@ -56,6 +56,18 @@ export function options(m, book) {
       hrid: g.hrid, name: guildBuffName(maps, g.hrid), shrine: n(g.shrineHrid),
       maxLevel: (sh => Math.min(sh || 20, Math.max(0, ...Object.keys(g.levelCosts || {}).map(Number).filter(Number.isFinite)) || sh || 20))(Number(maps.guildShrineDetailMap?.[g.shrineHrid]?.maxLevel) || 0),
     })),
+    // combat talisman modifiers (test-server data only so far): value of grade g = gradeValues[g - 1]
+    talismanModifiers: Object.values(maps.talismanModifierDetailMap || {})
+      .filter(d => d.talismanTypeHrid === "/talisman_types/combat")
+      .sort(bySort)
+      .map(d => ({ hrid: d.hrid, name: n(d.hrid), group: String(d.groupHrid || "").split("/").pop(), isPercent: !!d.isPercent, gradeValues: d.gradeValues || [] })),
+    talismanMaxModifiers: Number(maps.talismanInfo?.maxModifierCount) || 4,
+    // belts: talisman slots and power (power + bonus × enhancementBonus[level])
+    belts: Object.fromEntries(items.filter(i => i.equipmentDetail?.type === "/equipment_types/belt").map(i => {
+      const c = i.equipmentDetail.combatStats || {}
+      return [i.hrid, { slots: c.talismanSlots || 0, power: c.talismanPower || 0, bonus: i.equipmentDetail.combatEnhancementBonuses?.talismanPower || 0 }]
+    })),
+    enhancementBonus: maps.enhancementLevelTotalBonusMultiplierTable || [],
     enhancementCap: (maps.enhancementLevelSuccessRateTable || []).length || 20,
     levelXp: maps.levelExperienceTable || [],
     slotRequirements: maps.abilitySlotsLevelRequirementList || [],

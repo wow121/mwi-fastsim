@@ -91,6 +91,19 @@ function closeBundled() {
     sessionStorage.setItem("fastsim-bundled-closed", "1")
   } catch {}
 }
+// test-server game data (belts / talismans preview)
+const switchingData = ref(false)
+async function switchTestData(v) {
+  switchingData.value = true
+  try {
+    await call("PUT", "/api/gamedata", { test: v })
+    await loadState()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    switchingData.value = false
+  }
+}
 // matched in both languages (the message comes from the backend in the page's language)
 const noData = computed(() => /还没有游戏数据|No game data yet/.test(error.value)) // i18n-ok
 const menu = [
@@ -144,6 +157,9 @@ if (lastSeen.value === null) {
       <div class="muted" style="padding: 12px 16px; line-height: 1.8">
         <div v-if="store.engine">{{ t("引擎：{engine} · {n} 线程", { engine: engineLabel(store.engine), n: store.engine.threads }) }}</div>
         <div v-if="store.engine">{{ t("游戏数据：") }}{{ store.engine.gameVersion }}{{ store.engine.bundled ? t("（内置）") : "" }}</div>
+        <div v-if="store.engine?.testAvailable" :title="t('测试服的游戏数据，有腰带和符石，用来提前算它们的收益。正式服同步来的数据照常保存，关掉就换回去。')">
+          <el-switch :model-value="!!store.engine.test" :loading="switchingData" :active-text="t('测试服数据')" size="small" @change="switchTestData" />
+        </div>
         <div v-if="store.market">{{ t("市场价：") }}{{ timeOnly(store.market.timestamp * 1000) }}</div>
         <div v-if="store.team.syncedAt">{{ t("同步：") }}{{ dateTime(store.team.syncedAt) }}</div>
         <el-switch v-model="dark" :active-text="t('深色')" @change="applyDark" size="small" />

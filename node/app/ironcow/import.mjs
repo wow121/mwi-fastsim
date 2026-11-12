@@ -110,6 +110,7 @@ export function ironcowFromGame(m, payload, prev) {
   p.gameMode = gameModeOf(payload)
   p.life = lifeFromCharacter(m.$e, payload)
   p.syncedAt = Date.now()
+  delete p.talismansFromGame
   if (old) team.members[team.members.indexOf(old)] = p
   else {
     team.members.push(p)

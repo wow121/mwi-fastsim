@@ -11,6 +11,7 @@ const MAP_KEYS = [
   "enhancementLevelTotalBonusMultiplierTable", "equipmentTypeDetailMap", "guildBuffDetailMap", "guildShrineDetailMap",
   "houseRoomDetailMap", "itemCategoryDetailMap", "itemDetailMap", "itemLocationDetailMap", "labyrinthCrateDetailMap",
   "levelExperienceTable", "openableLootDropMap", "skillDetailMap", "shopItemDetailMap",
+  "talismanModifierDetailMap", "talismanTypeDetailMap", "talismanInfo",
 ]
 
 export function decodeGameData(raw) {

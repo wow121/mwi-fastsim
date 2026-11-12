@@ -61,15 +61,20 @@ async function useGameData(envelope) {
   return st
 }
 
+const fetchJson = async f => {
+  const r = await fetch(`${BASE}data/${f}`).catch(() => null)
+  return r?.ok ? r.json().catch(() => null) : null
+}
+
+/** The test-server data when switched on (belts / talismans preview), else synced from the game, else bundled. */
+async function chosenEnvelope() {
+  return ((await kvGet("testData", false)) && (await fetchJson("gamedata-test.json"))) || (await kvGet("envelope")) || (await fetchJson("gamedata.json"))
+}
+
 function ensureEngine() {
   if (ctx) return Promise.resolve(ctx)
   loading ||= (async () => {
-    // synced from the game, else the game data shipped with the site
-    let env = await kvGet("envelope")
-    if (!env) {
-      const r = await fetch(`${BASE}data/gamedata.json`).catch(() => null)
-      env = r?.ok ? await r.json() : null
-    }
+    const env = await chosenEnvelope()
     if (!env) throw new Error(NO_DATA())
     market = await kvGet("market")
     if (!market || Date.now() / 1000 - market.timestamp > 1800) await refreshMarket()
@@ -83,9 +88,10 @@ async function applyEnvelope(env) {
   if (!env) return ensureEngine()
   if (!ctx && !market) market = await kvGet("market")
   if (!market) await refreshMarket()
-  const st = await useGameData(env)
   await kvSet("envelope", env)
-  return st
+  // on the test-server data the live capture is only kept
+  if (await kvGet("testData", false)) return ensureEngine()
+  return useGameData(env)
 }
 
 export async function localApi(method, p, body = {}) {
@@ -93,9 +99,18 @@ export async function localApi(method, p, body = {}) {
   if (p === "/api/state" && method === "GET") {
     return {
       team: await kvGet("team", EMPTY_TEAM),
-      engine: ctx ? { mode: "wasm", gameVersion: ctx.m.version, bundled: ctx.m.envelope.source === "bundled", gameData: ctx.gdHash, threads: ctx.rust.threads } : null,
+      engine: ctx ? { mode: "wasm", gameVersion: ctx.m.version, bundled: ctx.m.envelope.source === "bundled", gameData: ctx.gdHash, threads: ctx.rust.threads, test: !!(await kvGet("testData", false)), testAvailable: true } : null,
       market: market ? { timestamp: market.timestamp } : null,
     }
+  }
+  if (p === "/api/gamedata" && method === "PUT") {
+    await kvSet("testData", !!body.test)
+    // an engine start already under way would finish on the other data afterwards
+    if (loading) await loading.catch(() => {})
+    const env = await chosenEnvelope()
+    if (!env) throw new Error(NO_DATA())
+    await (ctx ? useGameData(env) : ensureEngine())
+    return { test: !!body.test }
   }
   if (p === "/api/team" && method === "PUT") {
     await kvSet("team", { ...(await kvGet("team", EMPTY_TEAM)), ...body })

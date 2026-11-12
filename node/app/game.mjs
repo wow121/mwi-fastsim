@@ -18,7 +18,7 @@ export const REQUIRED_MAPS = [
   "houseRoomDetailMap", "itemCategoryDetailMap", "itemDetailMap", "itemLocationDetailMap", "labyrinthCrateDetailMap",
   "levelExperienceTable", "openableLootDropMap", "skillDetailMap",
 ]
-export const OPTIONAL_MAPS = ["shopItemDetailMap"]
+export const OPTIONAL_MAPS = ["shopItemDetailMap", "talismanModifierDetailMap", "talismanTypeDetailMap", "talismanInfo"]
 
 // the engine's two extra abilities (fury-style "blaze" / "bloom" procs), part of the engine port
 export const ABILITY_ALIASES = Object.freeze({ blaze: "/abilities/blaze", bloom: "/abilities/bloom" })
@@ -234,7 +234,38 @@ function achievements(maps, e) {
   return { buffs }
 }
 
-const EQUIPMENT_TYPES = ["head", "body", "legs", "feet", "hands", "main_hand", "two_hand", "off_hand", "pouch", "back"].map(t => `/equipment_types/${t}`)
+const EQUIPMENT_TYPES = ["head", "body", "legs", "feet", "hands", "main_hand", "two_hand", "off_hand", "pouch", "back", "belt"].map(t => `/equipment_types/${t}`)
+
+const COMBAT_STAT_TARGET = "/talisman_modifier_targets/combat_stat"
+
+/**
+ * Combat stats of the slotted talismans: each modifier's grade value × (1 + talismanPower of the gear),
+ * added to every stat in its `keys`; the same stat on several talismans adds up. Only the first
+ * `talismanSlots` (belt) entries count. Checked against the game's own stat totals on the test server
+ * (2026-11-12, 20 stat updates while slotting / rerolling).
+ * `talismans`: [{ modifiers: [{ hrid, grade }] } | null], index = slot - 1.
+ */
+export function talismanStats(maps, equipment, talismans) {
+  const out = {}
+  const mods = maps.talismanModifierDetailMap
+  if (!mods || !Array.isArray(talismans) || !talismans.length) return out
+  const eq = Object.values(equipment).filter(i => i != null)
+  const sum = k => eq.reduce((a, i) => a + i.getCombatStat(k), 0)
+  const slots = sum("talismanSlots")
+  const power = sum("talismanPower")
+  for (const tl of talismans.slice(0, slots)) {
+    for (const m of tl?.modifiers || []) {
+      const d = mods[m?.hrid]
+      const v = d?.gradeValues?.[m.grade - 1]
+      if (!d || d.targetHrid !== COMBAT_STAT_TARGET || !Number.isFinite(v)) continue
+      for (const k of d.keys || []) {
+        const key = k[0].toLowerCase() + k.slice(1)
+        out[key] = (out[key] || 0) + v * (1 + power)
+      }
+    }
+  }
+  return out
+}
 const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]
 
 /** `Qe.createFromDTO` */
@@ -242,6 +273,7 @@ export function playerFromDTO(game, t) {
   const maps = game.$e
   const equipment = Object.fromEntries(EQUIPMENT_TYPES.map(k => [k, null]))
   for (const [o, s] of Object.entries(t.equipment)) equipment[o] = s ? new Equipment(maps, s.hrid, s.enhancementLevel) : null
+  const tStats = talismanStats(maps, equipment, t.talismans)
   const p = {
     hrid: t.hrid,
     equipment,
@@ -256,7 +288,9 @@ export function playerFromDTO(game, t) {
     zoneBuffs: [],
     extraBuffs: [],
     statBonus: t.statBonus || null,
+    talismanStats: {},
   }
+  p.talismanStats = tStats
   for (const s of SKILLS) p[`${s}Level`] = t[`${s}Level`]
   let a = []
   if (Array.isArray(t.houseRooms)) a = t.houseRooms
@@ -431,7 +465,7 @@ export function playerStats(game, dto, { zoneBuffs: zb = [], extraBuffs: xb = []
   const boosts = type => buffs.filter(b => b.typeHrid == type)
   const boost = type => boosts(type).reduce((a, b) => ({ ratioBoost: a.ratioBoost + (b.ratioBoost ?? 0), flatBoost: a.flatBoost + (b.flatBoost ?? 0) }), { ratioBoost: 0, flatBoost: 0 })
   const eq = Object.values(p.equipment).filter(i => i != null)
-  const stat = k => eq.map(i => i.getCombatStat(k)).reduce((i, a) => i + a, 0)
+  const stat = k => eq.map(i => i.getCombatStat(k)).reduce((i, a) => i + a, 0) + (p.talismanStats[k] || 0)
   const levels = {}
   for (const s of SKILLS) {
     levels[s] = p[`${s}Level`]
