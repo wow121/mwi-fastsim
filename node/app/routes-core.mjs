@@ -15,6 +15,7 @@ import { optimizeLabyrinth } from "./opt-labyrinth.mjs"
 import { gearCost } from "./gear-cost.mjs"
 import { statValue } from "./opt-statvalue.mjs"
 import { scrollValue } from "./opt-scrolls.mjs"
+import { planTalisman } from "./opt-talisman.mjs"
 import { EMPTY_IRONCOW_TEAM, IRONCOW_JOBS, ironcowRoutes } from "./ironcow/jobs.mjs"
 import { countRuns } from "./job-progress.mjs"
 
@@ -30,6 +31,7 @@ export const JOB_TYPES = {
   labyrinth: { title: tk("迷宫配置推荐"), run: optimizeLabyrinth },
   statvalue: { title: tk("属性价值"), run: statValue },
   scrolls: { title: tk("卷轴价值"), run: scrollValue },
+  talisman: { title: tk("符石洗练"), run: planTalisman },
   ...IRONCOW_JOBS,
 }
 

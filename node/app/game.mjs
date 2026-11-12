@@ -240,13 +240,15 @@ const COMBAT_STAT_TARGET = "/talisman_modifier_targets/combat_stat"
 
 /**
  * Combat stats of the slotted talismans: each modifier's grade value × (1 + talismanPower of the gear),
- * added to every stat in its `keys`; the same stat on several talismans adds up. Only the first
- * `talismanSlots` (belt) entries count. Checked against the game's own stat totals on the test server
- * (2026-11-12, 20 stat updates while slotting / rerolling).
+ * added to every stat in its `keys`; the same stat on several talismans adds up, except the special
+ * ("unique") modifiers: of those only the highest counts. Only the first `talismanSlots` (belt) entries
+ * count. Checked against the game's own stat totals on the test server (2026-11-12: 20 stat updates while
+ * slotting / rerolling; shatter G2 + G1 on two talismans showed only the G2 value).
  * `talismans`: [{ modifiers: [{ hrid, grade }] } | null], index = slot - 1.
  */
 export function talismanStats(maps, equipment, talismans) {
   const out = {}
+  const unique = {}
   const mods = maps.talismanModifierDetailMap
   if (!mods || !Array.isArray(talismans) || !talismans.length) return out
   const eq = Object.values(equipment).filter(i => i != null)
@@ -258,12 +260,15 @@ export function talismanStats(maps, equipment, talismans) {
       const d = mods[m?.hrid]
       const v = d?.gradeValues?.[m.grade - 1]
       if (!d || d.targetHrid !== COMBAT_STAT_TARGET || !Number.isFinite(v)) continue
+      const special = String(d.groupHrid || "").endsWith("/special")
       for (const k of d.keys || []) {
         const key = k[0].toLowerCase() + k.slice(1)
-        out[key] = (out[key] || 0) + v * (1 + power)
+        if (special) unique[key] = Math.max(unique[key] || 0, v)
+        else out[key] = (out[key] || 0) + v * (1 + power)
       }
     }
   }
+  for (const [key, v] of Object.entries(unique)) out[key] = (out[key] || 0) + v * (1 + power)
   return out
 }
 const SKILLS = ["stamina", "intelligence", "attack", "melee", "defense", "ranged", "magic"]

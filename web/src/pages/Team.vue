@@ -231,7 +231,7 @@ async function deleteLoadout(l) {
               <span>{{ modValue(k - 1, j - 1) }}</span>
             </div>
           </div>
-          <div class="muted">{{ t("同一属性在几个符石上会直接相加。制裁、破甲、过量伤害、回响、坚守按游戏里的说明模拟，细节等正式服上线后再核对。") }}</div>
+          <div class="muted">{{ t("同一属性在几个符石上会直接相加；制裁、破甲、过量伤害、回响、坚守这五个特效不叠加，只算品级最高的那条。特效按游戏里的说明模拟，细节等正式服上线后再核对。") }}</div>
         </el-tab-pane>
         <el-tab-pane :label="t('技能')">
           <div v-for="(a, i) in member.abilities" :key="i" class="row" style="margin-bottom: 6px">

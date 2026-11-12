@@ -2,6 +2,7 @@
 import { guildBuffName, zh } from "./i18n.mjs"
 import { getLang } from "./lang.mjs"
 import { COMBAT_SEALS } from "./game.mjs"
+import { ORBS as TALISMAN_ITEMS } from "./opt-talisman.mjs"
 
 const sealName = s => (getLang() === "en" ? s.replace(/^Scroll Of\s+/i, "") : s.replace(/卷轴$/, "")) // i18n-ok
 const bySort = (a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0) || String(a.name).localeCompare(String(b.name))
@@ -60,7 +61,11 @@ export function options(m, book) {
     talismanModifiers: Object.values(maps.talismanModifierDetailMap || {})
       .filter(d => d.talismanTypeHrid === "/talisman_types/combat")
       .sort(bySort)
-      .map(d => ({ hrid: d.hrid, name: n(d.hrid), group: String(d.groupHrid || "").split("/").pop(), isPercent: !!d.isPercent, gradeValues: d.gradeValues || [] })),
+      .map(d => ({ hrid: d.hrid, name: n(d.hrid), group: String(d.groupHrid || "").split("/").pop(), isPercent: !!d.isPercent, gradeValues: d.gradeValues || [], weight: Number(d.weight) || 0 })),
+    // talisman orbs and cores: market price when there is one, else the shop sell price (a placeholder)
+    talismanItems: Object.values(TALISMAN_ITEMS).filter(h => maps.itemDetailMap[h]).map(h => ({
+      hrid: h, name: n(h), ask: Math.max(0, Number(book?.table?.[h]?.ask) || 0), sell: maps.itemDetailMap[h].sellPrice || 0,
+    })),
     talismanMaxModifiers: Number(maps.talismanInfo?.maxModifierCount) || 4,
     // belts: talisman slots and power (power + bonus × enhancementBonus[level])
     belts: Object.fromEntries(items.filter(i => i.equipmentDetail?.type === "/equipment_types/belt").map(i => {

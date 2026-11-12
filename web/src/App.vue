@@ -108,7 +108,7 @@ async function switchTestData(v) {
 const noData = computed(() => /还没有游戏数据|No game data yet/.test(error.value)) // i18n-ok
 const menu = [
   ["/team", tk("队伍")], ["/simulate", tk("模拟")], ["/zones", tk("刷图推荐")], ["/skills", tk("技能与触发优化")],
-  ["/consumables", tk("药水触发优化")], ["/upgrades", tk("整队提升规划")], ["/goal", tk("目标区域提升")], ["/stat-value", tk("属性价值")], ["/scrolls", tk("卷轴价值")], ["/gear-cost", tk("装备获取成本")], ["/labyrinth", tk("迷宫配置推荐")], ["/queue", tk("批量队列")], ["/jobs", tk("任务")],
+  ["/consumables", tk("药水触发优化")], ["/upgrades", tk("整队提升规划")], ["/goal", tk("目标区域提升")], ["/stat-value", tk("属性价值")], ["/scrolls", tk("卷轴价值")], ["/talisman", tk("符石洗练")], ["/gear-cost", tk("装备获取成本")], ["/labyrinth", tk("迷宫配置推荐")], ["/queue", tk("批量队列")], ["/jobs", tk("任务")],
 ]
 // Ironcow (铁牛) mode lives apart from the market-based pages; titles are t() keys
 const ironMenu = [["/ironcow", tk("铁牛模式")]]

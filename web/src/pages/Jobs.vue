@@ -15,7 +15,7 @@ onUnmounted(() => clearTimeout(timer))
 const statusText = { running: tk("运行中"), done: tk("完成"), error: tk("出错"), cancelled: tk("已取消"), interrupted: tk("中断") }
 const page = {
   skills: "/skills", consumables: "/consumables", upgrades: "/upgrades", goal: "/goal", zones: "/zones", queue: "/queue", labyrinth: "/labyrinth",
-  statvalue: "/stat-value", scrolls: "/scrolls", "ironcow-zones": "/ironcow", "ironcow-skills": "/ironcow", "ironcow-consumables": "/ironcow",
+  statvalue: "/stat-value", scrolls: "/scrolls", talisman: "/talisman", "ironcow-zones": "/ironcow", "ironcow-skills": "/ironcow", "ironcow-consumables": "/ironcow",
 }
 async function cancel(j) {
   await call("POST", `/api/jobs/${j.id}/cancel`)

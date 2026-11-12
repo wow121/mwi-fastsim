@@ -20,6 +20,7 @@ const routes = [
   { path: "/ironcow", component: () => import("./pages/Ironcow.vue") },
   { path: "/stat-value", component: () => import("./pages/StatValue.vue") },
   { path: "/scrolls", component: () => import("./pages/Scrolls.vue") },
+  { path: "/talisman", component: () => import("./pages/Talisman.vue") },
   { path: "/labyrinth", component: () => import("./pages/Labyrinth.vue") },
   { path: "/queue", component: () => import("./pages/Queue.vue") },
   { path: "/jobs/:id?", component: () => import("./pages/Jobs.vue") },

@@ -186,7 +186,7 @@ export default {
   "从角色的符石里选": "Pick one of the character's talismans",
   "词条": "Modifier",
   "品级": "Grade",
-  "同一属性在几个符石上会直接相加。制裁、破甲、过量伤害、回响、坚守按游戏里的说明模拟，细节等正式服上线后再核对。": "The same stat on several talismans simply adds up. Smite, Shatter, Overkill, Echo and Fortify follow the game's descriptions; details get checked once they are live.",
+  "同一属性在几个符石上会直接相加；制裁、破甲、过量伤害、回响、坚守这五个特效不叠加，只算品级最高的那条。特效按游戏里的说明模拟，细节等正式服上线后再核对。": "The same stat on several talismans simply adds up; the five specials (Smite, Shatter, Overkill, Echo, Fortify) do not stack, only the highest one counts. The specials follow the game's descriptions; details get checked once they are live.",
   // ---- App.vue: test-server data
   "测试服数据": "Test-server data",
   "测试服的游戏数据，有腰带和符石，用来提前算它们的收益。正式服同步来的数据照常保存，关掉就换回去。": "The test server's game data, with belts and talismans, to work out what they are worth ahead of time. Data synced from the live game is still kept; turn this off to switch back.",

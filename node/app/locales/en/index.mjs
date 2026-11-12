@@ -3,5 +3,6 @@ import app from "./app.mjs"
 import opt1 from "./opt1.mjs"
 import opt2 from "./opt2.mjs"
 import laby from "./laby.mjs"
+import talisman from "./talisman.mjs"
 
-export default Object.assign({}, laby, opt2, opt1, app)
+export default Object.assign({}, talisman, laby, opt2, opt1, app)
