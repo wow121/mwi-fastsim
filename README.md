@@ -117,7 +117,7 @@ node/
     ironcow/           铁牛模式（手搓成本、评估器、导入）
 web/               网页（Vue 3 + Element Plus）
   src/local/         浏览器版的接口实现（IndexedDB + WebAssembly Worker 池）
-userscript/        油猴脚本
+userscript/        油猴脚本（mwi-fastsim-ironcow.user.js 是旧铁牛导入地址上的同一份脚本，改完主脚本跑 make-ironcow-copy.mjs 生成）
 ```
 
 游戏数据（物品、怪物、技能、区域等）用的是游戏自己的客户端数据，由油猴脚本在游戏页面读取。
