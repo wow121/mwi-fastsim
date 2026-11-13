@@ -199,11 +199,10 @@ export default {
   "目标物品数量": "Target items",
   "（还没选目标物品，按金币算）": " (no target items chosen, using coins)",
   "铁牛队伍": "Ironcow team",
-  "角色由「铁牛导入」油猴脚本在游戏里读取，和普通队伍分开保存；勾选出战（最多 5 人）。":
-    "Characters are read in the game by the “ironcow import” userscript and kept apart from the normal team; tick who fights (up to 5).",
-  "安装铁牛导入脚本": "Install the ironcow import script",
-  "还没有铁牛角色：装好「铁牛导入」脚本，在游戏里登录铁牛角色，左下角出现紫色提示就说明读到了，再回到本页（网页版要刷新一下）。多个铁牛号就每个号各登录一次。":
-    "No ironcow characters yet: install the “ironcow import” script and log in with your ironcow character in the game — a purple note at the bottom left means it was read — then come back here (reload in the browser version). With several ironcow characters, log in with each once.",
+  "登录铁牛角色时，油猴脚本读取本人和点开过资料的队友，和普通队伍分开保存；勾选出战（最多 5 人）。":
+    "When you log in with an ironcow character, the userscript reads it and the teammates whose profiles you open, kept apart from the normal team; tick who fights (up to 5).",
+  "还没有铁牛角色：装好油猴脚本，在游戏里登录铁牛角色、点开队友的资料，左下角出现紫色提示就说明读到了，再回到本页（网页版要刷新一下）。多个铁牛号就每个号各登录一次。":
+    "No ironcow characters yet: install the userscript, log in with your ironcow character in the game and open your teammates' profiles — a purple note at the bottom left means it was read — then come back here (reload in the browser version). With several ironcow characters, log in with each once.",
   "出战": "Fight",
   "模式": "Mode",
   "食物 / 饮料": "Food / drinks",

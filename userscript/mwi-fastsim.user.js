@@ -2,9 +2,9 @@
 // @name         MWI 战斗工具
 // @name:en      MWI Combat Tools
 // @namespace    mwi-fastsim
-// @version      0.4.11
-// @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版；战斗模拟网站：模拟转发到本地 Rust 引擎加速
-// @description:en Game page: reads your character and teammates for the local tool / web version (wow121.github.io/mwi-fastsim); combat sim site: runs simulations on the local Rust engine
+// @version      0.5.0
+// @description  游戏页面：读取当前角色和队友数据发给本地工具 / 网页版（铁牛角色自动进铁牛队伍）；战斗模拟网站：模拟转发到本地 Rust 引擎加速
+// @description:en Game page: reads your character and teammates for the local tool / web version (wow121.github.io/mwi-fastsim); ironcow characters go to the ironcow team; combat sim site: runs simulations on the local Rust engine
 // 网页版：https://wow121.github.io/mwi-fastsim/ ；部署在自己的域名上、或在本机静态运行（如 http://localhost:5173）时，照下面的写法加一行 @match。
 // 本地服务模式（http://127.0.0.1:8765）默认关闭：在游戏页面的油猴菜单里点「本地服务」开启，
 // Tampermonkey 会询问一次是否允许访问 127.0.0.1（也可以自己在头部加 // @connect 127.0.0.1）
@@ -53,6 +53,8 @@
   // what the tool page (browser mode) picks up: the latest capture from the game / the sim site
   const GAME_KEY = "fastsim_game_capture_v1"
   const SITE_KEY = "fastsim_site_capture_v1"
+  // ironcow parties, by the logged-in character's name (several ironcow accounts can be kept)
+  const IRONCOW_KEY = "fastsim_ironcow_party_v1"
   const TOOL_URL = "fastsim_tool_url_v1"
 
   function post(path, body) {
@@ -87,7 +89,7 @@
     W.addEventListener("message", e => {
       if (e.origin !== location.origin || e.data?.source !== "mwi-fastsim-page" || e.data.type !== "hello") return
       GM_setValue(TOOL_URL, location.href.split("#")[0])
-      const data = { source: "mwi-fastsim-userscript", type: "data", game: GM_getValue(GAME_KEY, null), site: GM_getValue(SITE_KEY, null) }
+      const data = { source: "mwi-fastsim-userscript", type: "data", game: GM_getValue(GAME_KEY, null), site: GM_getValue(SITE_KEY, null), ironcow: Object.values(GM_getValue(IRONCOW_KEY, {}) || {}) }
       W.postMessage(JSON.parse(JSON.stringify(data)), location.origin)
     })
   }
@@ -96,11 +98,15 @@
   // Game page: same capture as the combat-sim site's data bridge, sent to the local server.
   // =====================================================================================
   function gamePage() {
+    // tells the retired 铁牛导入 script (0.2.0) that this one now does its job
+    document.documentElement.setAttribute("data-fastsim-main", "1")
     const PROFILE_CACHE = "fastsim_profile_cache_v1"
     const clone = v => { try { return JSON.parse(JSON.stringify(v)) } catch { return null } }
     const values = s => (Array.isArray(s) ? s : s && typeof s.values === "function" && typeof s.get === "function" ? Array.from(s.values()) : s && typeof s === "object" ? Object.values(s) : [])
     const valueOf = (s, k) => (!s || typeof s !== "object" ? null : typeof s.get === "function" ? s.get(k) || s.get(String(k)) || null : s[k] || s[String(k)] || null)
     let lastRaw = null
+    // the logged-in character is an ironcow: it and its party go to the ironcow team
+    let ironcow = false
     let partyNames = []
     let done = false
     let lastLab = ""
@@ -309,6 +315,9 @@
           continue
         }
         const c = cache[name.toLowerCase()]
+        // a teammate whose profile says it is of the other kind (ironcow / normal) stays out
+        const mode = String(c?.payload?.sharableCharacter?.gameMode || "")
+        if (mode && /ironcow/i.test(mode) !== ironcow) continue
         if (c && c.payload) members.push({ characterName: name, isCurrent: false, format: "shareable-profile", payload: { profile: c.payload } })
         else missing.push(name)
       }
@@ -327,11 +336,16 @@
         try { initClientData = W.localStorage.getItem("initClientData") } catch {}
         const body = { envelope: buildEnvelope() }
         // for the browser-mode tool page (always with the game data: it keeps its own copy)
-        GM_setValue(GAME_KEY, { capturedAt: Date.now(), body: { ...body, initClientData } })
+        const saved = { capturedAt: Date.now(), body: { ...body, initClientData } }
+        if (ironcow) {
+          const all = GM_getValue(IRONCOW_KEY, {}) || {}
+          all[profileName(lastRaw).toLowerCase()] = { name: profileName(lastRaw), ...saved }
+          GM_setValue(IRONCOW_KEY, all)
+        } else GM_setValue(GAME_KEY, saved)
         const missing = body.envelope.missingMembers || []
         if (initClientData && initClientData !== lastClientData) body.initClientData = initClientData
         try {
-          const r = await post("/api/game", body)
+          const r = await post(ironcow ? "/api/ironcow/game" : "/api/game", body)
           if (body.initClientData) lastClientData = initClientData
           const miss = r.missing?.length ? L(`（缺：${r.missing.join("、")}，在游戏里点开他们的资料）`, ` (missing: ${r.missing.join(", ")}; open their profiles in the game)`) : ""  // i18n-ok
           badge(L(`已同步 ${r.members} 人`, `synced ${r.members} characters`) + miss, !r.missing?.length)  // i18n-ok
@@ -353,8 +367,8 @@
           b.onclick = () => b.remove()
           document.body.appendChild(b)
         }
-        b.style.background = ok ? "#1a7f37" : "#9a6700"
-        b.textContent = L(`本地工具：${text}`, `Combat tools: ${text}`)  // i18n-ok
+        b.style.background = !ok ? "#9a6700" : ironcow ? "#8250df" : "#1a7f37"
+        b.textContent = ironcow ? L(`铁牛队伍：${text}`, `Ironcow team: ${text}`) : L(`本地工具：${text}`, `Combat tools: ${text}`)  // i18n-ok
       }
       if (document.body) add()
       else document.addEventListener("DOMContentLoaded", add, { once: true })
@@ -368,8 +382,8 @@
           const o = JSON.parse(event.data)
           if (o.type === "init_character_data") {
             done = true
-            // ironcow characters go to the ironcow team (the separate 铁牛导入 script)
-            if (/ironcow/i.test(String(o.character?.gameMode || ""))) return badge(L("铁牛角色不进普通队伍（用「铁牛导入」脚本）", "ironcow characters are not added to the normal team (use the ironcow import script)"), false)  // i18n-ok
+            // ironcow characters (and their party) go to the ironcow team, apart from the normal one
+            ironcow = /ironcow/i.test(String(o.character?.gameMode || ""))
             lastRaw = o
             partyNames = resolvePartyNames(o.partyInfo || o.data?.partyInfo, gameState())
             scheduleSend()

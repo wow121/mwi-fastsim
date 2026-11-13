@@ -9,9 +9,9 @@ import { dateTime, joinList, t, tk } from "../i18n.js"
 
 // Ironcow (铁牛) mode: no market. Drops are worth the shop sell price, food / drinks / keys cost
 // the time to make them by hand, and every rate is per "cycle hour" (combat + that hand work).
-// The characters come from the separate ironcow userscript and live in their own team.
+// The characters come from the userscript (an ironcow login + its opened teammate profiles) and live in their own team.
 const KEY = "fastsim-ironcow"
-const SCRIPT_URL = "https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim-ironcow.user.js"
+const SCRIPT_URL = "https://github.com/wow121/mwi-fastsim/raw/main/userscript/mwi-fastsim.user.js"
 const SKILLS = [["milking", tk("挤奶")], ["foraging", tk("采摘")], ["woodcutting", tk("伐木")], ["cheesesmithing", tk("奶酪锻造")], ["crafting", tk("制作")], ["tailoring", tk("缝纫")], ["cooking", tk("烹饪")], ["brewing", tk("冲泡")]]
 const GATHERING = new Set(["milking", "foraging", "woodcutting"])
 function load() {
@@ -231,11 +231,11 @@ const treeRows = (node, path = "") => (node.children || []).map((c, i) => ({ ...
         <span v-if="cfg.objective === 'items' && !cfg.targets.length" class="muted">{{ t("（还没选目标物品，按金币算）") }}</span>
       </div>
       <div class="row" style="margin-top: 8px"><b>{{ t("铁牛队伍") }}</b>
-        <span class="muted">{{ t("角色由「铁牛导入」油猴脚本在游戏里读取，和普通队伍分开保存；勾选出战（最多 5 人）。") }}</span>
-        <el-link type="primary" :href="SCRIPT_URL" target="_blank">{{ t("安装铁牛导入脚本") }}</el-link>
+        <span class="muted">{{ t("登录铁牛角色时，油猴脚本读取本人和点开过资料的队友，和普通队伍分开保存；勾选出战（最多 5 人）。") }}</span>
+        <el-link type="primary" :href="SCRIPT_URL" target="_blank">{{ t("安装油猴脚本") }}</el-link>
       </div>
       <el-alert v-if="!team.members.length" type="info" :closable="false" style="margin-top: 8px"
-        :title="t('还没有铁牛角色：装好「铁牛导入」脚本，在游戏里登录铁牛角色，左下角出现紫色提示就说明读到了，再回到本页（网页版要刷新一下）。多个铁牛号就每个号各登录一次。')" />
+        :title="t('还没有铁牛角色：装好油猴脚本，在游戏里登录铁牛角色、点开队友的资料，左下角出现紫色提示就说明读到了，再回到本页（网页版要刷新一下）。多个铁牛号就每个号各登录一次。')" />
       <el-table v-else :data="team.members" size="small" style="margin-top: 8px">
         <el-table-column :label="t('出战')" width="70"><template #default="{ row }"><el-checkbox :model-value="team.selected.includes(String(row.id))" @change="v => toggle(row, v)" /></template></el-table-column>
         <el-table-column prop="name" :label="t('角色')" width="140" />

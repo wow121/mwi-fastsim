@@ -8,7 +8,7 @@ import { optimizeSkills } from "../opt-skills.mjs"
 import { optimizeConsumables } from "../opt-consumables.mjs"
 import { IronEvaluator, IRONCOW_OBJECTIVES, normalizeIronCfg } from "./evaluator.mjs"
 import { CraftTimes, LIFE_SKILLS, SKILL_NAMES } from "./craft.mjs"
-import { ironcowFromGame } from "./import.mjs"
+import { ironcowFromEnvelope, ironcowFromGame } from "./import.mjs"
 
 const combatConsumables = maps => Object.values(maps.itemDetailMap)
   .filter(i => (i.categoryHrid === "/item_categories/food" || i.categoryHrid === "/item_categories/drink")
@@ -104,9 +104,11 @@ export async function ironcowRoutes(st, method, p, body, host) {
     return { ok: true }
   }
   if (p === "/api/ironcow/game" && method === "POST") {
-    // from the ironcow userscript: the logged-in character (+ the game's initClientData)
+    // from the userscript: the party envelope (logged-in character + opened teammate profiles), or
+    // the logged-in character alone (the old separate ironcow script), + the game's initClientData
     if (body.initClientData) st = await host.applyGameData(body.initClientData)
-    const { team, reply } = ironcowFromGame(st.m, body.character, await host.load())
+    const prev = await host.load()
+    const { team, reply } = body.envelope ? ironcowFromEnvelope(st.m, body.envelope, prev) : ironcowFromGame(st.m, body.character, prev)
     await host.save(team)
     return reply
   }

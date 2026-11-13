@@ -33,6 +33,7 @@ async function onUserscript(e) {
   const d = e.data
   if (e.origin === location.origin && d?.source === "mwi-fastsim-ironcow-userscript" && d.type === "ironcow") return onIroncow(d)
   if (e.origin !== location.origin || d?.source !== "mwi-fastsim-userscript" || d.type !== "data") return
+  await onIroncowParties(d.ironcow)
   const seen = Number(localStorage.getItem("fastsim-userscript-seen") || 0)
   const items = [["game", "/api/game", tk("游戏")], ["site", "/api/sync", tk("模拟网站")]].filter(([k]) => d[k] && d[k].capturedAt > seen)
   for (const [k, path, label] of items) {
@@ -47,7 +48,22 @@ async function onUserscript(e) {
     }
   }
 }
-// browser mode: characters captured by the separate ironcow userscript go to the ironcow team
+// browser mode: ironcow parties captured by the userscript (one per logged-in ironcow character)
+async function onIroncowParties(list) {
+  const seen = Number(localStorage.getItem("fastsim-ironcow-seen") || 0)
+  const fresh = (Array.isArray(list) ? list : []).filter(c => c?.body?.envelope && c.capturedAt > seen).sort((a, b) => a.capturedAt - b.capturedAt)
+  for (const c of fresh) {
+    try {
+      const r = await call("POST", "/api/ironcow/game", c.body)
+      localStorage.setItem("fastsim-ironcow-seen", String(c.capturedAt))
+      ElMessage.success(t("铁牛：已导入 {name}", { name: joinList(r.names || [c.name]) }) + (r.missing?.length ? t("（缺：{list}）", { list: joinList(r.missing) }) : ""))
+    } catch (err) {
+      ElMessage.error(t("铁牛导入 {name} 失败：{msg}", { name: c.name, msg: err.message }))
+    }
+  }
+  if (fresh.length) window.dispatchEvent(new Event("fastsim-ironcow-updated"))
+}
+// browser mode: characters captured by the old separate ironcow userscript (before 0.5.0 of the main one)
 async function onIroncow(d) {
   const seen = Number(localStorage.getItem("fastsim-ironcow-seen") || 0)
   const fresh = (d.captures || []).filter(c => c?.character && c.capturedAt > seen).sort((a, b) => a.capturedAt - b.capturedAt)

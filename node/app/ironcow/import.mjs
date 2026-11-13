@@ -1,4 +1,4 @@
-// Ironcow (铁牛) import: the logged-in character from the game page (the ironcow userscript), kept
+// Ironcow (铁牛) import: the logged-in ironcow character and the teammates whose profiles were opened (the userscript), kept
 // in its own team, apart from the market-mode team. Besides the combat setup (the shared importer)
 // it reads what hand-crafting speed depends on, the way milkonomy's player buffs do:
 // life skill levels, tools and worn gear (noncombat stats + enhancement), house rooms, the teas in
@@ -95,29 +95,117 @@ export function gameModeOf(e) {
   return String(e?.character?.gameMode || e?.gameMode || "")
 }
 
+/** Game mode of a teammate's shared profile ("" when the profile does not say). */
+export function sharedGameModeOf(payload) {
+  const e = payload?.profile && typeof payload.profile === "object" ? payload.profile : payload
+  return String(e?.sharableCharacter?.gameMode || e?.gameMode || "")
+}
+
 /**
- * Adds / replaces the captured character in the ironcow team (matched by name).
- * payload: the current-character payload (as the main userscript's compactProfile(…, true)).
+ * A teammate's shared profile in the shape lifeFromCharacter reads: skills, worn gear and tools
+ * (wearableItemMap), and the teas / house rooms when the profile has them. Community buffs are
+ * server-wide, so the logged-in character's are used.
  */
-export function ironcowFromGame(m, payload, prev) {
-  const team = prev && Array.isArray(prev.members) ? JSON.parse(JSON.stringify(prev)) : { members: [], selected: [] }
-  const name = String(payload?.character?.name || "").trim()
-  if (!name) throw new Error(t("没有读到角色名"))
+function lifeSourceOfShared(payload, current) {
+  const e = payload?.profile && typeof payload.profile === "object" ? payload.profile : payload
+  const items = []
+  for (const w of list(e?.wearableItemMap)) {
+    const it = w?.currentItem && typeof w.currentItem === "object" ? w.currentItem : w
+    if (it?.itemHrid && it?.itemLocationHrid) items.push({ itemHrid: it.itemHrid, itemLocationHrid: it.itemLocationHrid, enhancementLevel: num(it.enhancementLevel) })
+  }
+  return {
+    characterSkills: e?.characterSkills,
+    characterItems: items,
+    actionTypeDrinkSlotsMap: e?.actionTypeDrinkSlotsMap,
+    characterHouseRoomMap: e?.characterHouseRoomMap,
+    communityBuffs: current?.communityBuffs,
+  }
+}
+
+function emptyTeam(prev) {
+  return prev && Array.isArray(prev.members) ? JSON.parse(JSON.stringify(prev)) : { members: [], selected: [] }
+}
+
+/** Adds / replaces one imported player (matched by name); returns its id. */
+function upsert(m, team, name, build) {
   const old = team.members.find(p => p.name === name)
   const id = old?.id ?? Math.max(0, ...team.members.map(p => Number(p.id) || 0)) + 1
-  const p = importMember(m, payload, emptyPlayer(id, m.$e))
+  const p = build(emptyPlayer(id, m.$e))
   p.name = name
-  p.gameMode = gameModeOf(payload)
-  p.life = lifeFromCharacter(m.$e, payload)
   p.syncedAt = Date.now()
   delete p.talismansFromGame
   if (old) team.members[team.members.indexOf(old)] = p
   else {
     team.members.push(p)
     if (team.members.length > MAX_MEMBERS) team.members.shift()
-    if ((team.selected || []).length < 5) team.selected = [...(team.selected || []), String(id)]
   }
+  return { id: String(id), replaced: !!old }
+}
+
+/**
+ * Adds / replaces the captured character in the ironcow team (matched by name).
+ * payload: the current-character payload (as the main userscript's compactProfile(…, true)).
+ */
+export function ironcowFromGame(m, payload, prev) {
+  const team = emptyTeam(prev)
+  const name = String(payload?.character?.name || "").trim()
+  if (!name) throw new Error(t("没有读到角色名"))
+  const { id, replaced } = upsert(m, team, name, base => {
+    const p = importMember(m, payload, base)
+    p.gameMode = gameModeOf(payload)
+    p.life = lifeFromCharacter(m.$e, payload)
+    return p
+  })
+  if (!replaced && (team.selected || []).length < 5) team.selected = [...(team.selected || []), id]
   team.selected = (team.selected || []).filter(s => team.members.some(x => String(x.id) === s))
   team.syncedAt = Date.now()
-  return { team, reply: { ok: true, name, gameMode: p.gameMode, members: team.members.length, replaced: !!old } }
+  return { team, reply: { ok: true, name, gameMode: team.members.find(p => String(p.id) === id)?.gameMode || "", members: team.members.length, replaced } }
+}
+
+/**
+ * The party envelope of the (merged) game-page userscript, sent when the logged-in character is an
+ * ironcow: the character itself plus the teammates whose profiles were opened. Every member is
+ * added / replaced by name, and the party becomes the selected team. A teammate whose profile says
+ * it is a normal character is left out.
+ */
+export function ironcowFromEnvelope(m, envelope, prev) {
+  const team = emptyTeam(prev)
+  const current = envelope?.currentCharacter
+  const members = Array.isArray(envelope?.members) && envelope.members.length ? envelope.members : current ? [{ isCurrent: true, payload: current }] : []
+  const ids = []
+  const names = []
+  const skipped = []
+  const problems = []
+  for (const mem of members.slice(0, 5)) {
+    const payload = mem?.payload || {}
+    const shared = !mem?.isCurrent
+    const name = String(mem?.characterName || (shared ? payload?.profile?.sharableCharacter?.name : payload?.character?.name) || "").trim()
+    if (!name) continue
+    const mode = shared ? sharedGameModeOf(payload) : gameModeOf(payload)
+    if (shared && mode && !/ironcow/i.test(mode)) {
+      skipped.push(name)
+      continue
+    }
+    try {
+      const { id } = upsert(m, team, name, base => {
+        const p = importMember(m, payload, base)
+        // a teammate's profile does not always say: they are in an ironcow party
+        p.gameMode = mode || gameModeOf(current)
+        p.life = lifeFromCharacter(m.$e, shared ? lifeSourceOfShared(payload, current) : payload)
+        if (shared) p.source = "shared"
+        return p
+      })
+      ids.push(id)
+      names.push(name)
+    } catch (e) {
+      problems.push(`${name}: ${e.message}`)
+    }
+  }
+  if (!ids.length) throw new Error(problems[0] || t("没有读到角色名"))
+  team.selected = ids
+  team.syncedAt = Date.now()
+  return {
+    team,
+    reply: { ok: true, names, members: ids.length, missing: envelope?.missingMembers || [], skipped, problems },
+  }
 }
