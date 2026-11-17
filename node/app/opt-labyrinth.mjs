@@ -27,7 +27,7 @@ const INF = Number.POSITIVE_INFINITY
 const MAX_LEVEL = 1000
 const CONCURRENCY = 32
 // t() keys: translate where shown
-const SLOT_ZH = { weapon: tk("武器"), off_hand: tk("副手"), head: tk("头部"), body: tk("身体"), legs: tk("腿部"), hands: tk("手部"), feet: tk("脚部"), back: tk("背部"), neck: tk("项链"), earrings: tk("耳环"), ring: tk("戒指"), pouch: tk("袋子"), charm: tk("护符"), trinket: tk("饰品") }
+const SLOT_ZH = { weapon: tk("武器"), off_hand: tk("副手"), head: tk("头部"), body: tk("身体"), legs: tk("腿部"), hands: tk("手部"), feet: tk("脚部"), back: tk("背部"), neck: tk("项链"), earrings: tk("耳环"), ring: tk("戒指"), pouch: tk("袋子"), charm: tk("护符"), trinket: tk("饰品"), belt: tk("腰带") }
 const BUY_LEVELS = [0, 5, 8, 10, 12, 14]
 // progress estimates: rate() calls of one level search (doubling + binary), share of a pick's top
 // candidates that pass the screen and get one, candidate counts before a phase has been seen
