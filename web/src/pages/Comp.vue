@@ -19,11 +19,17 @@ const load = (k, d) => {
     return d
   }
 }
-const firstMember = store.team.members.find(m => store.team.selected.map(String).includes(String(m.id))) || store.team.members[0]
 const cfg = ref(load("fastsim-comp", {
-  size: 3, budget: 3000, builds: ROLES.map(r => r[0]), required: [], abilityLevel: 50, template: firstMember ? String(firstMember.id) : "",
-  levels: Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 100])), top: 5, objective: "profit", tax: 4,
+  size: 3, budget: 3000, builds: ROLES.map(r => r[0]), required: [], abilityLevel: 60, house: 8, achievements: true, levels: Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130])), top: 5, objective: "profit", tax: 4,
 }))
+if (!cfg.value.levels || "template" in cfg.value) {
+  cfg.value.levels = Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130]))
+  cfg.value.abilityLevel = 60
+}
+delete cfg.value.template
+delete cfg.value.level
+if (typeof cfg.value.house !== "number") cfg.value.house = 8
+if (typeof cfg.value.achievements !== "boolean") cfg.value.achievements = true
 watch(cfg, v => { try { localStorage.setItem("fastsim-comp", JSON.stringify(v)) } catch {} }, { deep: true })
 const target = ref(defaultTarget())
 const extra = ref(defaultExtra())
@@ -33,12 +39,6 @@ const out = ref(null)
 const zone = computed(() => [...(store.options?.zones || []), ...(store.options?.dungeons || [])].find(z => z.hrid === target.value.zoneHrid))
 const maxSize = computed(() => Math.min(5, zone.value?.maxPartySize || 5))
 watch(maxSize, v => { if (cfg.value.size > v) cfg.value.size = v })
-const tmplMember = computed(() => store.team.members.find(m => String(m.id) === String(cfg.value.template)))
-function copyLevels() {
-  const m = tmplMember.value
-  if (!m) return
-  for (const [s] of COMBAT_SKILLS) cfg.value.levels[s] = Number(m.levels?.[s] || 1)
-}
 // how many compositions: multisets of `size` from the roles, with the required ones
 const count = computed(() => {
   const k = cfg.value.builds.length
@@ -53,11 +53,10 @@ function params() {
   if (!cfg.value.builds.length) return ElMessage.warning(t("至少选一种职业"))
   if (cfg.value.required.some(r => !cfg.value.builds.includes(r))) return ElMessage.warning(t("必须包含的职业也要在可选职业里"))
   if (cfg.value.required.length > cfg.value.size) return ElMessage.warning(t("必须包含的职业比人数还多"))
-  const m = tmplMember.value
   return {
     target: target.value, extra: extra.value, objective: cfg.value.objective, size: cfg.value.size, budget: cfg.value.budget * 1e6,
     builds: cfg.value.builds, required: cfg.value.required, abilityLevel: cfg.value.abilityLevel, top: cfg.value.top, tax: cfg.value.tax / 100,
-    template: { levels: cfg.value.levels, houseRooms: m?.houseRooms || {}, guildBuffs: m?.guildBuffs || {}, achievements: m?.achievements || {} },
+    levels: cfg.value.levels, house: cfg.value.house, achievements: cfg.value.achievements,
   }
 }
 
@@ -98,7 +97,7 @@ function summary() {
     <el-card>
       <p class="muted" style="margin-top: 0">
         {{ t("从零组一支队伍：给定地图、人数和全队的装备预算，比较各种职业搭配（水法、火法、自然法、自然奶、剑、锤、枪、弓、弩、盾），每种搭配用预算买它最划算的装备，按收益排行。") }}
-        {{ t("每个角色用下面的等级（房子、公会、成就取自模板队员），技能和药品用这个职业的常见配置，技能等级统一。装备只按价格（市场、镜子、精炼里最便宜的拿法）和属性价值挑，不看你手上已有的。") }}
+        {{ t("每个角色都用下面的战斗等级和技能等级（所有房子都是下面的房子等级，可选全部成就，不算公会加成），技能和药品用这个职业的常见配置。装备只按价格（市场、镜子、精炼里最便宜的拿法）和属性价值挑，不看你手上已有的。") }}
         {{ t("先用模拟测出每种属性在这张图上对全队值多少，再在预算内挑总价值最高的装备组合；所有配队先粗筛，最好的几个再单独测、反复调整装备，最后长时间模拟确认。") }}
       </p>
       <div class="row" style="margin-bottom: 8px"><span class="muted" style="width: 70px">{{ t("目标") }}</span><TargetPicker v-model="target" :remember="false" /></div>
@@ -126,18 +125,15 @@ function summary() {
         <span class="muted">{{ t("同一职业选两次可以要求两个") }}</span>
       </div>
       <div class="row" style="margin-bottom: 8px">
-        <span class="muted" style="width: 70px">{{ t("模板队员") }}</span>
-        <el-select v-model="cfg.template" size="small" style="width: 160px" clearable :placeholder="t('无')">
-          <el-option v-for="m in store.team.members" :key="m.id" :label="m.name" :value="String(m.id)" />
-        </el-select>
-        <el-button size="small" :disabled="!tmplMember" @click="copyLevels">{{ t("用他的等级") }}</el-button>
-        <span class="muted">{{ t("技能等级") }}</span><el-input-number v-model="cfg.abilityLevel" :min="1" :max="200" size="small" style="width: 100px" />
-      </div>
-      <div class="row" style="margin-bottom: 8px">
-        <span class="muted" style="width: 70px">{{ t("等级") }}</span>
+        <span class="muted" style="width: 70px">{{ t("战斗等级") }}</span>
         <template v-for="[s, n] in COMBAT_SKILLS" :key="s">
           <span class="muted">{{ t(n) }}</span><el-input-number v-model="cfg.levels[s]" :min="1" :max="200" size="small" :controls="false" style="width: 60px" />
         </template>
+        <span class="muted">{{ t("技能等级") }}</span><el-input-number v-model="cfg.abilityLevel" :min="1" :max="200" size="small" style="width: 100px" />
+      </div>
+      <div class="row" style="margin-bottom: 8px">
+        <span class="muted" style="width: 70px">{{ t("房子等级") }}</span><el-input-number v-model="cfg.house" :min="0" :max="8" size="small" style="width: 90px" />
+        <el-checkbox v-model="cfg.achievements" size="small">{{ t("全部成就") }}</el-checkbox>
       </div>
       <div class="row" style="margin: 8px 0 12px">
         <span class="muted">{{ t("精调前几名") }}</span><el-input-number v-model="cfg.top" :min="1" :max="12" size="small" style="width: 90px" />
@@ -154,7 +150,7 @@ function summary() {
     <el-card v-if="result && (rows.length || result.screen?.length)" ref="out">
       <div class="muted" style="margin-bottom: 6px">
         {{ targetLabel(result.target) }} · {{ t("{n} 人", { n: result.size }) }} · {{ t("全队预算 {b}", { b: money(result.budget) }) }} ·
-        {{ t("等级 {l}，技能 {a} 级", { l: COMBAT_SKILLS.map(([s]) => result.levels[s]).join("/"), a: result.abilityLevel }) }} ·
+        {{ t("战斗等级 {l}，技能 {a} 级，房子 {h} 级", { l: COMBAT_SKILLS.map(([s]) => result.levels[s]).join("/"), a: result.abilityLevel, h: result.house }) }}{{ result.achievements ? t("，全部成就") : "" }} ·
         {{ t("最后每个配队 {h} 小时 × {n} 次", { h: result.final.hours, n: result.final.seeds }) }}
       </div>
       <el-alert v-if="rows.length && rows[0].mean.deathsPerHour > 1" type="warning" show-icon :closable="false" style="margin-bottom: 8px"

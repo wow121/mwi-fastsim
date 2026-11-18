@@ -1,7 +1,7 @@
 // Team composition ranking (配队排行): for a map, a team size and one gear budget for the whole team,
 // which mix of roles (water / fire / nature mage, healer, sword, mace, spear, bow, crossbow, bulwark tank)
 // earns the most, each with the gear the budget buys for it. The team is made up from scratch: every member has
-// the levels / house / guild / achievements of a template, a fixed skill set and consumables of its role.
+// the combat levels set on the page, a fixed skill set and consumables of its role (house rooms at one level, all achievements or none; no guild buffs).
 //
 // Gear is chosen by a knapsack on a linear value model: what one point of each combat stat is worth to the
 // team on this map (measured by simulation, as in 属性价值), so an item at +n is worth the sum of its stats ×
@@ -86,7 +86,7 @@ const slotOf = type => {
 }
 
 /**
- * Gear a role can wear with the template's levels: per slot the items (level requirements on combat skills met;
+ * Gear a role can wear with the given levels: per slot the items (level requirements on combat skills met;
  * requirements on other skills are not checked), each with its states (+n, cost = cheapest way to get it).
  */
 function catalog(maps, gp, key, levels) {
@@ -258,7 +258,7 @@ const kitKey = kit => SLOTS.map(s => (kit[s]?.h ? `${kit[s].h}+${kit[s].n}` : ""
 
 // ------------------------------------------------------------------------------------- members
 
-function memberConfig(maps, tmpl, key, kit, special, abilityLevel, idx) {
+function memberConfig(maps, levels, key, kit, special, abilityLevel, idx, opt) {
   const b = BUILDS[key]
   const have = h => !!maps.itemDetailMap[h]
   const abilities = [special ? A(special) : "", ...b.abilities.map(A)].map(h => ({ abilityHrid: maps.abilityDetailMap[h] ? h : "", level: abilityLevel }))
@@ -268,16 +268,17 @@ function memberConfig(maps, tmpl, key, kit, special, abilityLevel, idx) {
     id: `comp-${idx + 1}`,
     name: `${idx + 1}·${t(b.name)}`,
     build: key,
-    levels: { ...tmpl.levels },
+    levels: { ...levels },
     equipment,
     food: FOOD.map(I).filter(have),
     drinks: b.drinks.map(I).filter(have),
     abilities,
     abilityLevelMap: Object.fromEntries(abilities.filter(a => a.abilityHrid).map(a => [a.abilityHrid, abilityLevel])),
     triggerMap: {},
-    houseRooms: clone(tmpl.houseRooms || {}),
-    guildBuffs: clone(tmpl.guildBuffs || {}),
-    achievements: clone(tmpl.achievements || {}),
+    // every house room at the chosen level (capped at its top level)
+    houseRooms: Object.fromEntries(Object.values(maps.houseRoomDetailMap || {}).map(r => [r.hrid, Math.min(opt.house, Math.max(0, ...Object.keys(r.upgradeCostsMap || {}).map(Number)))]).filter(([, l]) => l > 0)),
+    guildBuffs: {},
+    achievements: opt.achievements ? Object.fromEntries(Object.keys(maps.achievementDetailMap || {}).map(h => [h, true])) : {},
     labyrinthUpgrades: {},
   }
 }
@@ -314,7 +315,7 @@ function compositions(allowed, n, required = []) {
 
 /**
  * params: { target, extra, objective ("profit" | "xp"), size, budget (coins, whole team), builds (allowed role
- *   keys), required (role keys that must be in), template: { levels, houseRooms, guildBuffs, achievements },
+ *   keys), required (role keys that must be in), levels (combat levels of every member, default 130), house (level of every house room, default 8), achievements (all done, default true),
  *   abilityLevel, top (compositions refined), rounds (refine rounds), tax, buyPrice, sellPrice }
  */
 export async function rankCompositions(ev0, params, api) {
@@ -326,8 +327,9 @@ export async function rankCompositions(ev0, params, api) {
   const n = Math.max(1, Math.floor(Number(params.size || 3)))
   const max = maxPartySize(ev.ctx.m, target)
   if (n > max) throw new Error(t("{zone} 最多 {max} 人", { zone: zh(maps, target.zoneHrid), max }))
-  const abilityLevel = Math.max(1, Math.floor(Number(params.abilityLevel || 50)))
-  const tmpl = { ...(params.template || {}), levels: Object.fromEntries(COMBAT.map(s => [s, Math.max(1, Math.floor(Number(params.template?.levels?.[s] || 100)))])) }
+  const abilityLevel = Math.max(1, Math.floor(Number(params.abilityLevel || 60)))
+  const memberOpt = { house: Math.max(0, Math.min(8, Math.floor(Number(params.house ?? 8)))), achievements: params.achievements !== false }
+  const levels = Object.fromEntries(COMBAT.map(s => [s, Math.max(1, Math.floor(Number(params.levels?.[s] || 130)))]))
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04
   const gp = new GearPrices(maps, pricedBook(ev.ctx.book, params), tax)
   const TOP = Math.max(1, Math.floor(Number(params.top || 5)))
@@ -340,7 +342,7 @@ export async function rankCompositions(ev0, params, api) {
   const allowed = (params.builds?.length ? params.builds : Object.keys(BUILDS)).filter(k => BUILDS[k])
   const cats = {}
   for (const k of allowed) {
-    const c = catalog(maps, gp, k, tmpl.levels)
+    const c = catalog(maps, gp, k, levels)
     if (c) cats[k] = c
     else api.log(t("{role}：这个等级穿不了任何这一类武器（或市场上买不到），不参与", { role: name(k) }))
   }
@@ -352,7 +354,7 @@ export async function rankCompositions(ev0, params, api) {
 
   const build = (keys, kits) => {
     const sp = specials(keys)
-    return keys.map((k, i) => memberConfig(maps, tmpl, k, kits[i], sp[i], abilityLevel, i))
+    return keys.map((k, i) => memberConfig(maps, levels, k, kits[i], sp[i], abilityLevel, i, memberOpt))
   }
   // planned work (sim-hours) for the progress bar
   const screen0 = { hours: 4, seeds: seedList(31001, 2) }
@@ -518,7 +520,7 @@ export async function rankCompositions(ev0, params, api) {
   return { ...header(), rows, screen }
 
   function header() {
-    return { target, size: n, budget, objective, abilityLevel, levels: tmpl.levels, roles, count: comps.length, final: { hours: FINAL.hours, seeds: FINAL.seeds.length }, screenRun: { hours: STAGES[0].hours, seeds: STAGES[0].seeds } }
+    return { target, size: n, budget, objective, abilityLevel, levels, house: memberOpt.house, achievements: memberOpt.achievements, roles, count: comps.length, final: { hours: FINAL.hours, seeds: FINAL.seeds.length }, screenRun: { hours: STAGES[0].hours, seeds: STAGES[0].seeds } }
   }
 }
 
