@@ -20,7 +20,7 @@ const load = (k, d) => {
   }
 }
 const cfg = ref(load("fastsim-comp", {
-  size: 3, budget: 3000, builds: ROLES.map(r => r[0]), required: [], abilityLevel: 60, house: 8, achievements: true, levels: Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130])), top: 5, objective: "profit", tax: 4,
+  size: 3, budget: 3000, builds: ROLES.map(r => r[0]), required: [], abilityLevel: 60, house: 8, achievements: true, even: false, levels: Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130])), top: 5, objective: "profit", tax: 4,
 }))
 if (!cfg.value.levels || "template" in cfg.value) {
   cfg.value.levels = Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130]))
@@ -56,13 +56,18 @@ function params() {
   return {
     target: target.value, extra: extra.value, objective: cfg.value.objective, size: cfg.value.size, budget: cfg.value.budget * 1e6,
     builds: cfg.value.builds, required: cfg.value.required, abilityLevel: cfg.value.abilityLevel, top: cfg.value.top, tax: cfg.value.tax / 100,
-    levels: cfg.value.levels, house: cfg.value.house, achievements: cfg.value.achievements,
+    levels: cfg.value.levels, house: cfg.value.house, achievements: cfg.value.achievements, even: cfg.value.even,
   }
 }
 
-const isXp = computed(() => result.value?.objective === "xp")
-const val = (v, xp = isXp.value) => (xp ? int(v) : money(v * 24))
-const valUnit = computed(() => (isXp.value ? t("经验/小时") : t("利润/天")))
+// ranking objective of the result: profit per day, encounters per hour (EPH) or experience per hour
+const obj = computed(() => result.value?.objective || "profit")
+const isXp = computed(() => obj.value === "xp")
+const KEY = { profit: "profitPerHour", eph: "encountersPerHour", xp: "xpPerHour" }
+const fmt = (v, o) => (v == null || !Number.isFinite(v) ? "—" : o === "xp" ? int(v) : o === "eph" ? v.toFixed(1) : money(v * 24))
+const val = (v, o = obj.value) => fmt(v, o)
+const UNIT = { profit: tk("利润/天"), eph: "EPH", xp: tk("经验/小时") }
+const valUnit = computed(() => t(UNIT[obj.value]))
 const comp = keys => keys.map(roleName).join(" + ")
 const rows = computed(() => result.value?.rows || [])
 
@@ -84,7 +89,7 @@ function summary() {
   const r = result.value
   const lines = [t("【配队排行】{target}，{n} 人，全队预算 {b}（{time}）", { target: targetLabel(r.target), n: r.size, b: money(r.budget), time: stamp() })]
   rows.value.forEach((x, i) => {
-    lines.push(t("{i}. {comp}：{unit} {v}，人均 {pv}，死亡 {d}/小时，装备 {c}", { i: i + 1, comp: comp(x.builds), unit: valUnit.value, v: val(x.value), pv: val(x.value / r.size), d: x.mean.deathsPerHour.toFixed(2), c: money(x.cost) }))
+    lines.push(t("{i}. {comp}：{unit} {v}，人均 {pv}，死亡 {d}/小时，装备 {c}", { i: i + 1, comp: comp(x.builds), unit: valUnit.value, v: val(x.value), pv: obj.value === "eph" ? "—" : val(x.value / r.size), d: x.mean.deathsPerHour.toFixed(2), c: money(x.cost) }))
     for (const m of x.members) lines.push("   " + t("{role}：{gear}", { role: roleName(m.build), gear: joinList(m.gear.map(g => `${itemName(g.h)} +${g.n}`)) }))
   })
   return lines.join("\n")
@@ -96,7 +101,7 @@ function summary() {
     <h2>{{ t("配队排行") }}</h2>
     <el-card>
       <p class="muted" style="margin-top: 0">
-        {{ t("从零组一支队伍：给定地图、人数和全队的装备预算，比较各种职业搭配（水法、火法、自然法、自然奶、剑、锤、枪、弓、弩、盾），每种搭配用预算买它最划算的装备，按收益排行。") }}
+        {{ t("从零组一支队伍：给定地图、人数和全队的装备预算，比较各种职业搭配（水法、火法、自然法、自然奶、剑、锤、枪、弓、弩、盾），每种搭配用预算买它最划算的装备（预算可以平均分给每人，也可以让优化决定怎么分），按收益排行。") }}
         {{ t("每个角色都用下面的战斗等级和技能等级（所有房子都是下面的房子等级，可选全部成就，不算公会加成），技能和药品用这个职业的常见配置。装备只按价格（市场、镜子、精炼里最便宜的拿法）和属性价值挑，不看你手上已有的。") }}
         {{ t("先用模拟测出每种属性在这张图上对全队值多少，再在预算内挑总价值最高的装备组合；所有配队先粗筛，最好的几个再单独测、反复调整装备，最后长时间模拟确认。") }}
       </p>
@@ -105,10 +110,12 @@ function summary() {
       <div class="row" style="margin-bottom: 8px">
         <span class="muted" style="width: 70px">{{ t("人数") }}</span><el-input-number v-model="cfg.size" :min="1" :max="maxSize" size="small" style="width: 90px" />
         <span class="muted">{{ t("全队预算") }}</span><el-input-number v-model="cfg.budget" :min="0" :step="500" size="small" style="width: 140px" /><span class="muted">M</span>
-        <span class="muted">{{ t("目标") }}</span>
+        <el-tooltip :content="t('勾上后每人最多花全队预算 ÷ 人数；不勾时预算在队员之间怎么分也一起优化')" placement="top"><el-checkbox v-model="cfg.even" size="small">{{ t("平均分配") }}</el-checkbox></el-tooltip>
+        <el-tooltip :content="t('按什么排名，也按它挑装备。EPH = 每小时打完的战斗次数（地下城是每小时通关次数）')" placement="top"><span class="muted">{{ t("排序") }}</span></el-tooltip>
         <el-radio-group v-model="cfg.objective" size="small">
-          <el-radio-button value="profit">{{ t("利润") }}</el-radio-button>
-          <el-radio-button value="xp">{{ t("经验") }}</el-radio-button>
+          <el-radio-button value="profit">{{ t("日利润优先") }}</el-radio-button>
+          <el-radio-button value="eph">{{ t("EPH 优先") }}</el-radio-button>
+          <el-radio-button value="xp">{{ t("经验优先") }}</el-radio-button>
         </el-radio-group>
       </div>
       <div class="row" style="margin-bottom: 8px">
@@ -149,7 +156,7 @@ function summary() {
 
     <el-card v-if="result && (rows.length || result.screen?.length)" ref="out">
       <div class="muted" style="margin-bottom: 6px">
-        {{ targetLabel(result.target) }} · {{ t("{n} 人", { n: result.size }) }} · {{ t("全队预算 {b}", { b: money(result.budget) }) }} ·
+        {{ targetLabel(result.target) }} · {{ t("{n} 人", { n: result.size }) }} · {{ t("全队预算 {b}", { b: money(result.budget) }) }}{{ result.even ? t("（平均分配）") : "" }} ·
         {{ t("战斗等级 {l}，技能 {a} 级，房子 {h} 级", { l: COMBAT_SKILLS.map(([s]) => result.levels[s]).join("/"), a: result.abilityLevel, h: result.house }) }}{{ result.achievements ? t("，全部成就") : "" }} ·
         {{ t("最后每个配队 {h} 小时 × {n} 次", { h: result.final.hours, n: result.final.seeds }) }}
       </div>
@@ -162,7 +169,7 @@ function summary() {
               <div v-for="(m, i) in row.members" :key="i" style="margin-bottom: 10px">
                 <div>
                   <b>{{ i + 1 }}. {{ roleName(m.build) }}</b>
-                  <span class="muted"> · {{ t("装备 {c}", { c: money(m.cost) }) }} · {{ valUnit }} {{ val(isXp ? m.metrics.xpPerHour : m.metrics.profitPerHour) }} · {{ t("死亡 {d}/小时", { d: (m.metrics.deathsPerHour || 0).toFixed(2) }) }}</span>
+                  <span class="muted"> · {{ t("装备 {c}", { c: money(m.cost) }) }} · {{ isXp ? t("经验/小时") : t("利润/天") }} {{ val(isXp ? m.metrics.xpPerHour : m.metrics.profitPerHour, isXp ? "xp" : "profit") }} · {{ t("死亡 {d}/小时", { d: (m.metrics.deathsPerHour || 0).toFixed(2) }) }}</span>
                 </div>
                 <div class="muted">{{ t("技能：") }}{{ joinList(m.abilities.map(abilityName)) }} · {{ t("饮料：") }}{{ joinList(m.drinks.map(itemName)) }}</div>
                 <el-table :data="m.gear" size="small" style="max-width: 820px">
@@ -179,10 +186,12 @@ function summary() {
         <el-table-column type="index" width="40" />
         <el-table-column :label="t('配队')" min-width="220"><template #default="{ row }">{{ comp(row.builds) }}</template></el-table-column>
         <el-table-column :label="valUnit" align="right" min-width="120">
-          <template #default="{ row }"><b>{{ val(row.value) }}</b> <span class="muted">{{ row.mean.ci?.[isXp ? "xpPerHour" : "profitPerHour"] ? "±" + val(row.mean.ci[isXp ? "xpPerHour" : "profitPerHour"]) : "" }}</span></template>
+          <template #default="{ row }"><b>{{ val(row.value) }}</b> <span class="muted">{{ row.mean.ci?.[KEY[obj]] ? "±" + val(row.mean.ci[KEY[obj]]) : "" }}</span></template>
         </el-table-column>
-        <el-table-column :label="t('人均')" align="right" width="100"><template #default="{ row }">{{ val(row.value / result.size) }}</template></el-table-column>
-        <el-table-column v-if="!isXp" :label="t('经验/小时')" align="right" width="100"><template #default="{ row }">{{ int(row.mean.xpPerHour) }}</template></el-table-column>
+        <el-table-column v-if="obj !== 'eph'" :label="t('人均')" align="right" width="100"><template #default="{ row }">{{ val(row.value / result.size) }}</template></el-table-column>
+        <template v-for="o in ['profit', 'eph', 'xp'].filter(o => o !== obj)" :key="o">
+          <el-table-column :label="t(UNIT[o])" align="right" width="100"><template #default="{ row }">{{ fmt(row.mean[KEY[o]], o) }}</template></el-table-column>
+        </template>
         <el-table-column :label="t('死亡/小时')" align="right" width="90"><template #default="{ row }"><span :class="{ bad: row.mean.deathsPerHour > 0.05 }">{{ row.mean.deathsPerHour.toFixed(2) }}</span></template></el-table-column>
         <el-table-column :label="t('装备花费')" align="right" width="100"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
       </el-table>

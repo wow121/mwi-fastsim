@@ -314,20 +314,22 @@ function compositions(allowed, n, required = []) {
 // ------------------------------------------------------------------------------------- the job
 
 /**
- * params: { target, extra, objective ("profit" | "xp"), size, budget (coins, whole team), builds (allowed role
+ * params: { target, extra, objective ("profit" | "eph" | "xp"), size, budget (coins, whole team), builds (allowed role
  *   keys), required (role keys that must be in), levels (combat levels of every member, default 130), house (level of every house room, default 8), achievements (all done, default true),
- *   abilityLevel, top (compositions refined), rounds (refine rounds), tax, buyPrice, sellPrice }
+ *   abilityLevel, top (compositions refined), rounds (refine rounds), tax, buyPrice, sellPrice, even (budget split evenly among the members) }
  */
 export async function rankCompositions(ev0, params, api) {
   const ev = withRunCache(ev0)
   const maps = ev.ctx.m.$e
   const { target, extra } = params
-  const objective = params.objective === "xp" ? "xp" : "profit"
+  const objective = ["xp", "eph"].includes(params.objective) ? params.objective : "profit"
   const budget = Math.max(0, Number(params.budget || 0))
   const n = Math.max(1, Math.floor(Number(params.size || 3)))
   const max = maxPartySize(ev.ctx.m, target)
   if (n > max) throw new Error(t("{zone} 最多 {max} 人", { zone: zh(maps, target.zoneHrid), max }))
   const abilityLevel = Math.max(1, Math.floor(Number(params.abilityLevel || 60)))
+  // even: every member spends at most budget / size (otherwise the split is searched with the gear)
+  const even = params.even === true
   const memberOpt = { house: Math.max(0, Math.min(8, Math.floor(Number(params.house ?? 8)))), achievements: params.achievements !== false }
   const levels = Object.fromEntries(COMBAT.map(s => [s, Math.max(1, Math.floor(Number(params.levels?.[s] || 130)))]))
   const tax = Number.isFinite(Number(params.tax)) ? Number(params.tax) : 0.04
@@ -407,6 +409,11 @@ export async function rankCompositions(ev0, params, api) {
   const STEPS = 100
   const ladderValue = (k, j) => ladders[k].ks.value(Math.floor((j * budget) / STEPS / ladders[k].ks.u))
   const splitKits = keys => {
+    // even split: every member its share
+    if (even) return keys.map(k => {
+      const p = ladders[k].ks.pick(share)
+      return p ? kitOf(ladders[k].groups, p) : roughKit[k]
+    })
     // budget split among the members (in 1% steps) where the values add up most
     let dp = new Float64Array(STEPS + 1)
     const ch = []
@@ -476,7 +483,8 @@ export async function rankCompositions(ev0, params, api) {
       const models = hist.map(averaged)
       const proposals = []
       const groups = c.keys.flatMap((k, i) => slotGroups(maps, cats[k], models[i], i))
-      const p = knapsack(groups, budget).pick(budget)
+      // even split: no proposal moves money between members
+      const p = even ? null : knapsack(groups, budget).pick(budget)
       if (p) proposals.push(c.keys.map((_, i) => {
         const kit = {}
         groups.forEach((g, gi) => { if (g.member === i) kit[g.slot] = g.options[p[gi]] })
@@ -485,7 +493,7 @@ export async function rankCompositions(ev0, params, api) {
       const spare = Math.max(0, budget - kitsCost(best.kits))
       c.keys.forEach((k, i) => {
         const g = slotGroups(maps, cats[k], models[i])
-        const b = kitCost(best.kits[i]) + spare
+        const b = even ? share : kitCost(best.kits[i]) + spare
         const q = knapsack(g, b).pick(b)
         if (q) proposals.push(best.kits.map((kit, j) => (j === i ? kitOf(g, q) : kit)))
       })
@@ -520,11 +528,12 @@ export async function rankCompositions(ev0, params, api) {
   return { ...header(), rows, screen }
 
   function header() {
-    return { target, size: n, budget, objective, abilityLevel, levels, house: memberOpt.house, achievements: memberOpt.achievements, roles, count: comps.length, final: { hours: FINAL.hours, seeds: FINAL.seeds.length }, screenRun: { hours: STAGES[0].hours, seeds: STAGES[0].seeds } }
+    return { target, size: n, budget, objective, abilityLevel, levels, house: memberOpt.house, achievements: memberOpt.achievements, even, roles, count: comps.length, final: { hours: FINAL.hours, seeds: FINAL.seeds.length }, screenRun: { hours: STAGES[0].hours, seeds: STAGES[0].seeds } }
   }
 }
 
 function fmtObj(v, objective) {
+  if (objective === "eph") return `${v.toFixed(1)} EPH`
   return objective === "xp" ? t("{v} 经验/小时", { v: Math.round(v).toLocaleString() }) : t("{v}/天", { v: M(v * 24) })
 }
 

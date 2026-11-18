@@ -44,6 +44,7 @@ export function objectiveValue(metrics, objective) {
   switch (objective) {
     case "xp": return metrics.xpPerHour
     case "profitMid": return metrics.profitMidpointPerHour
+    case "eph": return metrics.encountersPerHour
     default: return metrics.profitPerHour
   }
 }
