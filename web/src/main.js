@@ -15,6 +15,7 @@ const routes = [
   { path: "/skills", component: () => import("./pages/Skills.vue") },
   { path: "/consumables", component: () => import("./pages/Consumables.vue") },
   { path: "/goal", component: () => import("./pages/Goal.vue") },
+  { path: "/comp", component: () => import("./pages/Comp.vue") },
   { path: "/upgrades", component: () => import("./pages/Upgrades.vue") },
   { path: "/gear-cost", component: () => import("./pages/GearCost.vue") },
   { path: "/ironcow", component: () => import("./pages/Ironcow.vue") },

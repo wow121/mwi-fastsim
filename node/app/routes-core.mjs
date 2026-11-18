@@ -16,10 +16,11 @@ import { gearCost } from "./gear-cost.mjs"
 import { statValue } from "./opt-statvalue.mjs"
 import { scrollValue } from "./opt-scrolls.mjs"
 import { planTalisman } from "./opt-talisman.mjs"
+import { BUILDS, rankCompositions } from "./opt-comp.mjs"
 import { EMPTY_IRONCOW_TEAM, IRONCOW_JOBS, ironcowRoutes } from "./ironcow/jobs.mjs"
 import { countRuns } from "./job-progress.mjs"
 
-export { EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes }
+export { BUILDS, EMPTY_IRONCOW_TEAM, gearCost, ironcowRoutes }
 
 export const JOB_TYPES = {
   skills: { title: tk("整队技能与触发优化"), run: optimizeSkills },
@@ -32,6 +33,7 @@ export const JOB_TYPES = {
   statvalue: { title: tk("属性价值"), run: statValue },
   scrolls: { title: tk("卷轴价值"), run: scrollValue },
   talisman: { title: tk("符石洗练"), run: planTalisman },
+  comp: { title: tk("配队排行"), run: rankCompositions },
   ...IRONCOW_JOBS,
 }
 

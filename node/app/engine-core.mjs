@@ -3,7 +3,7 @@
 // and the browser build.
 import { ABILITY_ALIASES, EXTRA_ABILITIES, extraBuffs, sealBuffs, generatePermanentBuffs, labyrinthBuffs, labyrinthUpgradeBuffs, playerFromDTO, zoneBuffs } from "./game.mjs"
 
-const PLAYER_KEYS = [
+export const PLAYER_KEYS = [
   "stabAccuracy", "slashAccuracy", "smashAccuracy", "rangedAccuracy", "magicAccuracy",
   "stabDamage", "slashDamage", "smashDamage", "rangedDamage", "magicDamage", "defensiveDamage",
   "taskDamage", "physicalAmplify", "waterAmplify", "natureAmplify", "fireAmplify",
