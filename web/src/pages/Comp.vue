@@ -20,7 +20,7 @@ const load = (k, d) => {
   }
 }
 const cfg = ref(load("fastsim-comp", {
-  size: 3, budget: 3000, builds: ROLES.map(r => r[0]), required: [], abilityLevel: 60, house: 8, achievements: true, even: false, levels: Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130])), top: 5, objective: "profit", tax: 4,
+  size: 3, budget: 3000, builds: ROLES.map(r => r[0]), required: [], abilityLevel: 60, house: 8, achievements: true, even: false, maxDeaths: 0.1, levels: Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130])), top: 5, objective: "profit", tax: 4,
 }))
 if (!cfg.value.levels || "template" in cfg.value) {
   cfg.value.levels = Object.fromEntries(COMBAT_SKILLS.map(([s]) => [s, 130]))
@@ -30,6 +30,7 @@ delete cfg.value.template
 delete cfg.value.level
 if (typeof cfg.value.house !== "number") cfg.value.house = 8
 if (typeof cfg.value.achievements !== "boolean") cfg.value.achievements = true
+if (typeof cfg.value.maxDeaths !== "number") cfg.value.maxDeaths = 0.1
 watch(cfg, v => { try { localStorage.setItem("fastsim-comp", JSON.stringify(v)) } catch {} }, { deep: true })
 const target = ref(defaultTarget())
 const extra = ref(defaultExtra())
@@ -56,7 +57,7 @@ function params() {
   return {
     target: target.value, extra: extra.value, objective: cfg.value.objective, size: cfg.value.size, budget: cfg.value.budget * 1e6,
     builds: cfg.value.builds, required: cfg.value.required, abilityLevel: cfg.value.abilityLevel, top: cfg.value.top, tax: cfg.value.tax / 100,
-    levels: cfg.value.levels, house: cfg.value.house, achievements: cfg.value.achievements, even: cfg.value.even,
+    levels: cfg.value.levels, house: cfg.value.house, achievements: cfg.value.achievements, even: cfg.value.even, maxDeaths: cfg.value.maxDeaths,
   }
 }
 
@@ -143,6 +144,8 @@ function summary() {
         <el-checkbox v-model="cfg.achievements" size="small">{{ t("全部成就") }}</el-checkbox>
       </div>
       <div class="row" style="margin: 8px 0 12px">
+        <el-tooltip :content="t('死亡超过这个数的配队排在所有没超过的后面，挑装备时也会往不死的方向调。EPH 和经验本身几乎不受死亡影响：死的人等着复活，其他人照样在打')" placement="top"><span class="muted">{{ t("最多死亡/小时") }}</span></el-tooltip>
+        <el-input-number v-model="cfg.maxDeaths" :min="0" :max="100" :step="0.1" :precision="2" size="small" style="width: 110px" />
         <span class="muted">{{ t("精调前几名") }}</span><el-input-number v-model="cfg.top" :min="1" :max="12" size="small" style="width: 90px" />
         <span class="muted">{{ t("市场税") }}</span><el-input-number v-model="cfg.tax" :min="0" :max="20" :step="0.5" size="small" style="width: 100px" /><span class="muted">%</span>
         <span class="muted">{{ t("共 {n} 种配队", { n: count }) }}</span>
@@ -156,7 +159,7 @@ function summary() {
 
     <el-card v-if="result && (rows.length || result.screen?.length)" ref="out">
       <div class="muted" style="margin-bottom: 6px">
-        {{ targetLabel(result.target) }} · {{ t("{n} 人", { n: result.size }) }} · {{ t("全队预算 {b}", { b: money(result.budget) }) }}{{ result.even ? t("（平均分配）") : "" }} ·
+        {{ targetLabel(result.target) }} · {{ t("{n} 人", { n: result.size }) }} · {{ t("全队预算 {b}", { b: money(result.budget) }) }}{{ result.even ? t("（平均分配）") : "" }}{{ result.maxDeaths != null ? " · " + t("最多死亡 {d}/小时", { d: result.maxDeaths }) : "" }} ·
         {{ t("战斗等级 {l}，技能 {a} 级，房子 {h} 级", { l: COMBAT_SKILLS.map(([s]) => result.levels[s]).join("/"), a: result.abilityLevel, h: result.house }) }}{{ result.achievements ? t("，全部成就") : "" }} ·
         {{ t("最后每个配队 {h} 小时 × {n} 次", { h: result.final.hours, n: result.final.seeds }) }}
       </div>
@@ -179,6 +182,12 @@ function summary() {
                   <el-table-column prop="how" :label="t('怎么拿')" min-width="200" />
                 </el-table>
               </div>
+              <div v-if="row.items" class="muted" style="margin-bottom: 4px">
+                {{ t("全队主要收入：") }}{{ joinList(row.items.revenue.map(x => `${itemName(x.itemHrid)} ${money(x.valuePerHour * 24)}`)) }}
+              </div>
+              <div v-if="row.items" class="muted" style="margin-bottom: 8px">
+                {{ t("全队药品消耗（每天）：") }}{{ joinList(row.items.expenses.map(x => `${itemName(x.itemHrid)} ${money(x.valuePerHour * 24)}`)) }}
+              </div>
               <el-button size="small" @click="addToTeam(row)">{{ t("加到队伍") }}</el-button>
             </div>
           </template>
@@ -192,7 +201,7 @@ function summary() {
         <template v-for="o in ['profit', 'eph', 'xp'].filter(o => o !== obj)" :key="o">
           <el-table-column :label="t(UNIT[o])" align="right" width="100"><template #default="{ row }">{{ fmt(row.mean[KEY[o]], o) }}</template></el-table-column>
         </template>
-        <el-table-column :label="t('死亡/小时')" align="right" width="90"><template #default="{ row }"><span :class="{ bad: row.mean.deathsPerHour > 0.05 }">{{ row.mean.deathsPerHour.toFixed(2) }}</span></template></el-table-column>
+        <el-table-column :label="t('死亡/小时')" align="right" width="90"><template #default="{ row }"><span :class="{ bad: row.over }">{{ row.mean.deathsPerHour.toFixed(2) }}</span></template></el-table-column>
         <el-table-column :label="t('装备花费')" align="right" width="100"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
       </el-table>
       <el-collapse v-if="result.screen?.length" style="margin-top: 12px">
@@ -201,7 +210,7 @@ function summary() {
             <el-table-column type="index" width="40" />
             <el-table-column :label="t('配队')" min-width="220"><template #default="{ row }">{{ comp(row.builds) }}</template></el-table-column>
             <el-table-column :label="valUnit" align="right" width="120"><template #default="{ row }">{{ val(row.value) }}</template></el-table-column>
-            <el-table-column :label="t('死亡/小时')" align="right" width="90"><template #default="{ row }">{{ row.deaths.toFixed(2) }}</template></el-table-column>
+            <el-table-column :label="t('死亡/小时')" align="right" width="90"><template #default="{ row }"><span :class="{ bad: row.over }">{{ row.deaths.toFixed(2) }}</span></template></el-table-column>
             <el-table-column :label="t('装备花费')" align="right" width="100"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
           </el-table>
         </el-collapse-item>

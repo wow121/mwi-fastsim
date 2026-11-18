@@ -17,7 +17,7 @@
 //  2. the best few are refined on their own: values measured in that team, knapsack over the whole team,
 //     simulated, a few rounds (values averaged over the rounds), the best kit kept; then a long final run.
 import { halving, pool } from "./search.mjs"
-import { seedList, vsBase, withRunCache } from "./evaluator.mjs"
+import { objectiveValue, seedList, vsBase, withRunCache } from "./evaluator.mjs"
 import { PLAYER_KEYS } from "./engine-core.mjs"
 import { GearPrices, pricedBook, SLOT_ZH } from "./opt-upgrades.mjs"
 import { classOf } from "./skill-pools.mjs"
@@ -182,15 +182,14 @@ function priorModel(maps, cat) {
 // ------------------------------------------------------------------------------------- knapsack
 
 /**
- * Multiple-choice knapsack: one option per group, total cost ≤ budget, most value. Costs are rounded to
- * 1/G of the budget; the pick is checked against the real costs and taken at a lower budget when the rounding
- * let it run over. Returns { best(j) → value, pick(budget) → option index per group, null if none fits }.
+ * Multiple-choice knapsack: one option per group, total cost ≤ budget, most value. Costs are rounded up to
+ * whole 1/G of the budget, so whatever fits a budget in units fits it in coins too (a pick is checked anyway). Returns { best(j) → value, pick(budget) → option index per group, null if none fits }.
  */
 function knapsack(groups, budget, G = 2000) {
   const u = Math.max(1, budget / G)
   let dp = new Float64Array(G + 1)
   const choice = []
-  const units = groups.map(g => g.options.map(o => Math.max(0, Math.round(o.cost / u))))
+  const units = groups.map(g => g.options.map(o => Math.max(0, Math.ceil(o.cost / u - 1e-9))))
   groups.forEach((g, gi) => {
     const nd = new Float64Array(G + 1).fill(-INF)
     const ch = new Int16Array(G + 1).fill(-1)
@@ -245,6 +244,12 @@ function slotGroups(maps, cat, model, member = 0) {
     out.push({ member, slot, options })
   }
   return out
+}
+
+/** The cheapest weapon and nothing else (when a member's share buys no set at all). */
+function cheapestKit(cat) {
+  const w = cat.slots.weapon.reduce((a, b) => (b.cost < a.cost ? b : a))
+  return { weapon: { ...w, slot: "weapon" } }
 }
 
 /** Kit (slot → state) from picked options. */
@@ -316,10 +321,23 @@ function compositions(allowed, n, required = []) {
 /**
  * params: { target, extra, objective ("profit" | "eph" | "xp"), size, budget (coins, whole team), builds (allowed role
  *   keys), required (role keys that must be in), levels (combat levels of every member, default 130), house (level of every house room, default 8), achievements (all done, default true),
- *   abilityLevel, top (compositions refined), rounds (refine rounds), tax, buyPrice, sellPrice, even (budget split evenly among the members) }
+ *   abilityLevel, top (compositions refined), rounds (refine rounds), tax, buyPrice, sellPrice, even (budget split evenly among the members), maxDeaths (per hour; teams over it rank last, default 0.1) }
  */
 export async function rankCompositions(ev0, params, api) {
-  const ev = withRunCache(ev0)
+  // deaths above the cap (per hour) cost the score 10× its size per death: a team over it ranks below any
+  // team under it, and the stat values / gear choice lean towards surviving (EPH and experience barely
+  // notice deaths on their own: a dead member just waits to come back while the others go on)
+  const maxDeaths = Math.max(0, Number(params.maxDeaths ?? 0.1))
+  const penal = (v, d) => v - 10 * Math.max(Math.abs(v), 1e-9) * Math.max(0, d - maxDeaths)
+  const cached = withRunCache(ev0)
+  const ev = {
+    ctx: cached.ctx,
+    evaluate: async (mem, tg, o) => {
+      const r = await cached.evaluate(mem, tg, o)
+      const perSeed = r.perSeed.map((v, i) => penal(v, r.per[i].deathsPerHour))
+      return { ...r, raw: r.value, perSeed, value: perSeed.reduce((a, v) => a + v, 0) / perSeed.length }
+    },
+  }
   const maps = ev.ctx.m.$e
   const { target, extra } = params
   const objective = ["xp", "eph"].includes(params.objective) ? params.objective : "profit"
@@ -398,7 +416,7 @@ export async function rankCompositions(ev0, params, api) {
     const team = build(ref.keys, ref.keys.map(x => roughKit[x]))
     models[k] = await measure(ev, maps, team, idx, cats[k], { ...common, ...MEAS, seedBase: 6100 + roles.indexOf(k) }, spent)
     api.progress(++done, roles.length, t("测各职业的属性价值"))
-    api.log(t("{role}（在 {c} 里测）：{top}", { role: name(k), c: compName(ref.keys), top: topWeights(models[k], cats[k], maps) }))
+    api.log(t("{role}（在 {c} 里测）：{top}", { role: name(k), c: compName(ref.keys), top: topWeights(models[k], cats[k], maps, objective) }))
   })
   // each role's best kit for every budget
   const ladders = {}
@@ -412,7 +430,7 @@ export async function rankCompositions(ev0, params, api) {
     // even split: every member its share
     if (even) return keys.map(k => {
       const p = ladders[k].ks.pick(share)
-      return p ? kitOf(ladders[k].groups, p) : roughKit[k]
+      return p ? kitOf(ladders[k].groups, p) : cheapestKit(cats[k])
     })
     // budget split among the members (in 1% steps) where the values add up most
     let dp = new Float64Array(STEPS + 1)
@@ -440,7 +458,7 @@ export async function rankCompositions(ev0, params, api) {
     return keys.map((k, i) => {
       const b = (parts[i] * budget) / STEPS
       const p = ladders[k].ks.pick(b)
-      return p ? kitOf(ladders[k].groups, p) : roughKit[k]
+      return p ? kitOf(ladders[k].groups, p) : cheapestKit(cats[k])
     })
   }
 
@@ -458,7 +476,7 @@ export async function rankCompositions(ev0, params, api) {
     },
     onScored: (s, sorted) => { if (s === 0) all0 = sorted },
   })
-  const screen = all0.slice(0, 40).map(c => ({ builds: c.keys, value: c.value, deaths: c.mean.deathsPerHour, cost: c.kits.reduce((s, k) => s + kitCost(k), 0) }))
+  const screen = all0.slice(0, 40).map(c => ({ builds: c.keys, value: objectiveValue(c.mean, objective), over: c.mean.deathsPerHour > maxDeaths, deaths: c.mean.deathsPerHour, cost: c.kits.reduce((s, k) => s + kitCost(k), 0) }))
   api.partial?.({ ...header(), rows: [], screen })
 
   // ---- 2. refine the best ones on their own
@@ -521,14 +539,15 @@ export async function rankCompositions(ev0, params, api) {
     }
     const fin = await ev0.evaluate(best.team, target, { ...FINAL, ...common, items: true })
     spent(FINAL.hours * FINAL.seeds.length)
-    rows.push(rowOf(maps, c.keys, best, fin, name))
-    rows.sort((a, b) => b.value - a.value)
+    // shown: the objective itself; ranked: with the deaths over the cap counted against it
+    rows.push({ ...rowOf(maps, c.keys, best, fin, name), score: penal(fin.value, fin.mean.deathsPerHour), over: fin.mean.deathsPerHour > maxDeaths })
+    rows.sort((a, b) => b.score - a.score)
     api.partial?.({ ...header(), rows, screen })
   }
   return { ...header(), rows, screen }
 
   function header() {
-    return { target, size: n, budget, objective, abilityLevel, levels, house: memberOpt.house, achievements: memberOpt.achievements, even, roles, count: comps.length, final: { hours: FINAL.hours, seeds: FINAL.seeds.length }, screenRun: { hours: STAGES[0].hours, seeds: STAGES[0].seeds } }
+    return { target, size: n, budget, objective, abilityLevel, levels, maxDeaths, house: memberOpt.house, achievements: memberOpt.achievements, even, roles, count: comps.length, final: { hours: FINAL.hours, seeds: FINAL.seeds.length }, screenRun: { hours: STAGES[0].hours, seeds: STAGES[0].seeds } }
   }
 }
 
@@ -551,7 +570,8 @@ function rowOf(maps, keys, best, fin, name) {
       metrics: fin.mean.players[i],
     }
   })
-  return { builds: keys, value: fin.value, mean: fin.mean, cost: members.reduce((s, m) => s + m.cost, 0), members, configs: best.team }
+  const items = fin.mean.items ? { revenue: fin.mean.items.revenue.slice(0, 8), expenses: fin.mean.items.expenses.slice(0, 8) } : null
+  return { builds: keys, value: fin.value, mean: { ...fin.mean, items: undefined }, items, cost: members.reduce((s, m) => s + m.cost, 0), members, configs: best.team }
 }
 
 /** Mean of several measurements (weights and whole-item values). */
@@ -565,7 +585,7 @@ function averaged(list) {
   return { w, D, slotPrior: 0 }
 }
 
-function topWeights(model, cat, maps) {
+function topWeights(model, cat, maps, objective) {
   // the stats that matter most for this role, as the value of the measuring step (about one good item's worth)
   const labels = {}
   for (const g of statGroups(maps, { equipment: { weapon: { itemHrid: cat.weapons[0] } } })) for (const k of g.keys || []) labels[k] ||= g.label
@@ -574,7 +594,7 @@ function topWeights(model, cat, maps) {
   labels.defensiveDamage = t("防御伤害")
   const keysOf = g => (g === "evasion" ? EVASIONS : g === "resistance" ? RESISTANCES : [g])
   const vals = Object.entries(model.steps || {}).map(([g, step]) => [g, keysOf(g).reduce((a, k) => a + (model.w[k] || 0), 0) * step]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 4)
-  return joinList(vals.map(([g, v]) => `${labels[g] || g} ${M(v * 24)}`)) || t("（都不明显）")
+  return joinList(vals.map(([g, v]) => `${labels[g] || g} ${objective === "eph" ? v.toFixed(2) : objective === "xp" ? Math.round(v).toLocaleString() : M(v * 24)}`)) || t("（都不明显）")
 }
 
 /**
